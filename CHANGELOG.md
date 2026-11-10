@@ -2,6 +2,18 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-10
+
+### Added
+
+- `wt-auth` (`auth`, on by default): `Login`, `Failed`, `Lockout`, `Logout`, `PasswordReset`, `Registered`, `Verified` and `OtherDeviceLogout` as buffered in-execution records with guard, user id, client IP (trusted proxies respected) and user agent. Failed logins and lockouts carry the attempted identifier, read only from `auth.identifier_keys` (default `email`, `username`, `login`, `phone`; keys matching the redaction pattern are ignored, so the password is never read) and masked per `auth.identifier_mode` (`masked` by default, `full` or `none`). Capped at 100 per execution.
+- `wt-hello` lists `auth` when enabled.
+- Shield (`shield`, off by default): bot and spam protection from rules managed in Watch Tower. A global middleware placed after `TrustProxies` evaluates the allow list, blocked IPs (IPv4/IPv6 CIDR), user agent expressions, path globs, rate limits (per `ip`, `user` or `ip_path`, with `block_seconds` penalties), the honeypot and Turnstile challenges, answering 403 or 429 with `Retry-After` (JSON when asked) without naming the rule. Monitor mode only reports `would_block`; `WATCHTOWER_AGENT_SHIELD_MODE` overrides the mode.
+- Shield rules are pulled from `/api/shield/v1/rules` with the environment token (2 s timeout, `If-None-Match`/304) by `watchtower:shield-sync` every minute, cached for their ttl with the last good copy kept, and refreshed after the response on a miss. Without rules every request is allowed.
+- Turnstile challenge: an interstitial for browser GETs, `POST /_watchtower/shield/verify` checking the token with `TURNSTILE_SECRET` from the app's env, and a signed `wt_shield_pass` cookie (30 minutes, bound to the client IP).
+- `@watchtowerHoneypot` Blade directive and `WatchtowerAgent::honeypotField()`.
+- `wt-shield` in-execution records for every decision that is not "allow"; `wt-hello` lists `shield` when enabled.
+
 ## [0.2.0] - 2026-11-10
 
 ### Added

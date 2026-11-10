@@ -8,6 +8,7 @@ use Cyberwizard\ScheduleCatchup\Events\ScheduleOccurrenceDeferred;
 use Cyberwizard\ScheduleCatchup\Events\ScheduleOccurrenceFailed;
 use Cyberwizard\ScheduleCatchup\Events\ScheduleOccurrenceReplayed;
 use Cyberwizard\ScheduleCatchup\Events\ScheduleOutageRecorded;
+use Cyberwizard\WatchtowerAgent\Auth\AuthRecorder;
 use Cyberwizard\WatchtowerAgent\Broadcasting\BroadcastRecorder;
 use Cyberwizard\WatchtowerAgent\Cache\CacheOpRecorder;
 use Cyberwizard\WatchtowerAgent\Catchup\CatchupReporter;
@@ -16,6 +17,7 @@ use Cyberwizard\WatchtowerAgent\Console\HealthReportCommand;
 use Cyberwizard\WatchtowerAgent\Console\HelloCommand;
 use Cyberwizard\WatchtowerAgent\Console\QueueSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\ScheduleSyncCommand;
+use Cyberwizard\WatchtowerAgent\Console\ShieldSyncCommand;
 use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
 use Cyberwizard\WatchtowerAgent\Events\EventRecorder;
 use Cyberwizard\WatchtowerAgent\Events\InstrumentedDispatcher;
@@ -29,6 +31,13 @@ use Cyberwizard\WatchtowerAgent\Queue\QueuePayload;
 use Cyberwizard\WatchtowerAgent\Records\ExecutionLimiter;
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Records\RecordFactory;
+use Cyberwizard\WatchtowerAgent\Shield\Evaluator;
+use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
+use Cyberwizard\WatchtowerAgent\Shield\PassCookie;
+use Cyberwizard\WatchtowerAgent\Shield\RulesRepository;
+use Cyberwizard\WatchtowerAgent\Shield\ShieldMiddleware;
+use Cyberwizard\WatchtowerAgent\Shield\ShieldRecorder;
+use Cyberwizard\WatchtowerAgent\Shield\VerifyChallengeController;
 use Cyberwizard\WatchtowerAgent\Webhooks\RecordIncomingWebhook;
 use Cyberwizard\WatchtowerAgent\Webhooks\SpatieWebhookRecorder;
 use Cyberwizard\WatchtowerAgent\Workers\WorkerHeartbeat;
@@ -41,9 +50,11 @@ use Illuminate\Console\Events\ScheduledTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskStarting;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Events\MessageSent;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -78,6 +89,11 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->app->singleton(MailRecorder::class);
         $this->app->singleton(CacheOpRecorder::class);
         $this->app->singleton(HttpRecorder::class);
+        $this->app->singleton(AuthRecorder::class);
+        $this->app->singleton(RulesRepository::class);
+        $this->app->singleton(Evaluator::class);
+        $this->app->singleton(ShieldRecorder::class);
+        $this->app->singleton(PassCookie::class);
 
         $this->instrumentEventDispatcher();
 
@@ -108,8 +124,12 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
                 QueueSnapshotCommand::class,
                 HealthReportCommand::class,
                 ActionsCommand::class,
+                ShieldSyncCommand::class,
             ]);
         }
+
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower-agent');
+        $this->registerShield();
 
         $this->registerListeners($this->app->make(Dispatcher::class));
         $this->registerObservability($this->app->make(Dispatcher::class));
@@ -178,7 +198,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
     }
 
     /**
-     * Events, broadcasts, cache operations, mail, outgoing HTTP, webhooks and trace context.
+     * Events, broadcasts, cache operations, mail, outgoing HTTP, webhooks, trace context and auth.
      * Every hook checks its feature flag when it runs; none of them can throw into the app.
      */
     private function registerObservability(Dispatcher $events): void
@@ -205,6 +225,13 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $events->listen(JobQueued::class, [MailRecorder::class, 'queued']);
         $events->listen(MessageSending::class, [MailRecorder::class, 'sending']);
         $events->listen(MessageSent::class, [MailRecorder::class, 'sent']);
+
+        // illuminate/auth is not a dependency; listen only to the events that exist.
+        foreach (array_keys(AuthRecorder::EVENTS) as $event) {
+            if (class_exists($event)) {
+                $events->listen($event, [AuthRecorder::class, 'handle']);
+            }
+        }
 
         QueuePayload::register();
 
@@ -260,6 +287,64 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         });
     }
 
+    /**
+     * Shield: the global middleware, the challenge verify route and @watchtowerHoneypot. All
+     * three are installed even when the feature is off and check the flag when they run.
+     */
+    private function registerShield(): void
+    {
+        $this->callAfterResolving(HttpKernel::class, function ($kernel): void {
+            self::installShieldMiddleware($kernel);
+        });
+
+        if (! ($this->app instanceof CachesRoutes && $this->app->routesAreCached())) {
+            $this->callAfterResolving('router', function ($router): void {
+                if (! $router->has('watchtower.shield.verify')) {
+                    $router->post(ShieldMiddleware::VERIFY_PATH, VerifyChallengeController::class)->name('watchtower.shield.verify');
+                }
+            });
+        }
+
+        $this->callAfterResolving('blade.compiler', function ($blade): void {
+            $blade->directive('watchtowerHoneypot', static fn (): string => '<?php echo \\'.Honeypot::class.'::render(); ?>');
+        });
+    }
+
+    /**
+     * Shield runs before the rest of the global stack, but after TrustProxies (so
+     * $request->ip() is the client, not the load balancer) and after Nightwatch's own global
+     * middleware (so the request is already being captured and sampled).
+     */
+    public static function installShieldMiddleware(mixed $kernel): void
+    {
+        if (! method_exists($kernel, 'getGlobalMiddleware') || ! method_exists($kernel, 'setGlobalMiddleware')) {
+            if (method_exists($kernel, 'prependMiddleware')) {
+                $kernel->prependMiddleware(ShieldMiddleware::class);
+            }
+
+            return;
+        }
+
+        $middleware = array_values(array_filter(
+            $kernel->getGlobalMiddleware(),
+            static fn (mixed $entry): bool => $entry !== ShieldMiddleware::class,
+        ));
+
+        $position = 0;
+
+        foreach ($middleware as $index => $entry) {
+            $class = is_string($entry) ? explode(':', $entry, 2)[0] : null;
+
+            if ($class !== null && (is_a($class, TrustProxies::class, true) || $class === 'Laravel\Nightwatch\Hooks\GlobalMiddleware')) {
+                $position = $index + 1;
+            }
+        }
+
+        array_splice($middleware, $position, 0, [ShieldMiddleware::class]);
+
+        $kernel->setGlobalMiddleware($middleware);
+    }
+
     private function scheduleCommands(Schedule $schedule): void
     {
         if (! WatchtowerAgent::enabled() || ! config('watchtower-agent.schedule_commands', true)) {
@@ -282,6 +367,10 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         if (WatchtowerAgent::feature('actions')) {
             $schedule->command(ActionsCommand::class)->everyMinute()->withoutOverlapping();
+        }
+
+        if (WatchtowerAgent::feature('shield')) {
+            $schedule->command(ShieldSyncCommand::class)->everyMinute()->withoutOverlapping();
         }
     }
 }

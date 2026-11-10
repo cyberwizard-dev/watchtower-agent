@@ -44,6 +44,8 @@ return [
         'http' => (bool) env('WATCHTOWER_AGENT_HTTP', true),
         'webhooks' => (bool) env('WATCHTOWER_AGENT_WEBHOOKS', true),
         'trace_context' => (bool) env('WATCHTOWER_AGENT_TRACE_CONTEXT', true),
+        'auth' => (bool) env('WATCHTOWER_AGENT_AUTH', true),
+        'shield' => (bool) env('WATCHTOWER_AGENT_SHIELD', false),
     ],
 
     /*
@@ -206,6 +208,52 @@ return [
     'trace_context' => [
         'outgoing' => (bool) env('WATCHTOWER_AGENT_TRACE_OUTGOING', true),
         'incoming' => (bool) env('WATCHTOWER_AGENT_TRACE_INCOMING', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication events (wt-auth)
+    |--------------------------------------------------------------------------
+    |
+    | Login, failed login, lockout, logout, password reset, registration,
+    | verification and other-device logout. The attempted identifier of a
+    | failed login or lockout is read only from identifier_keys (keys matching
+    | the redaction pattern are ignored; the password is never read) and sent
+    | per identifier_mode: "masked" (j***@example.com), "full" or "none".
+    |
+    */
+
+    'auth' => [
+        'identifier_mode' => env('WATCHTOWER_AGENT_AUTH_IDENTIFIER', 'masked'),
+        'identifier_keys' => $csv(env('WATCHTOWER_AGENT_AUTH_IDENTIFIER_KEYS')) ?? ['email', 'username', 'login', 'phone'],
+        'max_per_execution' => 100,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Shield: bot & spam protection (wt-shield)
+    |--------------------------------------------------------------------------
+    |
+    | Off by default. Rules are pulled from Watch Tower's Shield API with the
+    | environment token, cached in the app cache for the rules' ttl (the last
+    | good copy is kept when Watch Tower is unreachable) and refreshed every
+    | minute by watchtower:shield-sync, or after the response on a cache
+    | miss. Without rules every request is allowed (fail open). mode_override
+    | ("monitor" or "enforce") replaces the mode Watch Tower sends.
+    | turnstile_secret comes from the app's env and never from Watch Tower.
+    |
+    */
+
+    'shield' => [
+        'base_url' => env('NIGHTWATCH_BASE_URL'),
+        'token' => env('NIGHTWATCH_TOKEN'),
+        'timeout' => (int) env('WATCHTOWER_AGENT_SHIELD_TIMEOUT', 2),
+        'cache_store' => env('WATCHTOWER_AGENT_SHIELD_CACHE_STORE'),
+        'mode_override' => env('WATCHTOWER_AGENT_SHIELD_MODE'),
+        'turnstile_secret' => env('TURNSTILE_SECRET'),
+        'pass_minutes' => (int) env('WATCHTOWER_AGENT_SHIELD_PASS_MINUTES', 30),
+        'honeypot_field' => env('WATCHTOWER_AGENT_SHIELD_HONEYPOT_FIELD', 'wt_hp_website'),
+        'max_per_execution' => 10,
     ],
 
     /*

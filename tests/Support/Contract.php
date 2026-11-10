@@ -33,7 +33,7 @@ class Contract
 
     public const IN_EXECUTION = [
         'wt-event', 'wt-event-summary', 'wt-listener-run', 'wt-broadcast', 'wt-cache-op',
-        'wt-mail', 'wt-http', 'wt-webhook-in', 'wt-trace-link',
+        'wt-mail', 'wt-http', 'wt-webhook-in', 'wt-trace-link', 'wt-auth', 'wt-shield',
     ];
 
     public const TYPES = [
@@ -206,6 +206,25 @@ class Contract
             'parent_trace_id' => 'string',
             'parent_span_id' => 'string',
         ],
+        'wt-auth' => [
+            'event' => 'string',
+            'guard' => '?string',
+            'user_id' => '?string',
+            'identifier' => '?string',
+            'ip' => '?string',
+            'user_agent' => '?string',
+            'remember' => '?bool',
+        ],
+        'wt-shield' => [
+            'action' => 'string',
+            'rule' => 'string',
+            'ip' => 'string',
+            'method' => 'string',
+            'path' => 'string',
+            'user_agent' => '?string',
+            'user_id' => '?string',
+            'rules_version' => 'string',
+        ],
     ];
 
     public const EVENT_LISTENER = [
@@ -280,6 +299,8 @@ class Contract
         'wt-webhook-in.status' => ['processed', 'failed', 'rejected'],
         'wt-event.listeners.status' => ['ok', 'failed', 'queued'],
         'wt-broadcast.channels.type' => ['public', 'private', 'presence'],
+        'wt-shield.action' => ['blocked', 'rate_limited', 'challenged', 'challenge_passed', 'challenge_failed', 'honeypot', 'would_block'],
+        'wt-auth.event' => ['login', 'failed', 'lockout', 'logout', 'password_reset', 'registered', 'verified', 'other_device_logout'],
     ];
 
     /**
@@ -323,6 +344,8 @@ class Contract
             }, $record['channels']),
             'wt-http' => $record['webhook'] === null ? null : self::assertShape($record['webhook'], self::HTTP_WEBHOOK, 'wt-http.webhook'),
             'wt-mail' => array_map(fn ($address) => Assert::assertIsString($address), [...$record['to'], ...$record['cc'], ...$record['bcc']]),
+            'wt-shield' => $record['user_agent'] === null ? null : Assert::assertLessThanOrEqual(255, mb_strlen($record['user_agent']), 'wt-shield.user_agent is at most 255 characters'),
+            'wt-auth' => $record['user_agent'] === null ? null : Assert::assertLessThanOrEqual(255, mb_strlen($record['user_agent']), 'wt-auth.user_agent is at most 255 characters'),
             default => null,
         };
 
