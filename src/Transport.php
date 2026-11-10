@@ -71,6 +71,22 @@ class Transport implements RecordTransport
         }
     }
 
+    public function sample(): void
+    {
+        $core = $this->core();
+
+        if ($core === null) {
+            return;
+        }
+
+        try {
+            // Core::sample() is Nightwatch's public API; a rate of 1.0 always keeps the execution.
+            $core->sample(1.0);
+        } catch (Throwable) {
+            //
+        }
+    }
+
     /**
      * Nightwatch defers some values (trace id in the console, user id before the guard
      * resolves) as LazyValue objects; records must hold plain scalars, so resolve them now.

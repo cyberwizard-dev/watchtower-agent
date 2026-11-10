@@ -3,6 +3,7 @@
 namespace Cyberwizard\WatchtowerAgent\Auth;
 
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
+use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
 use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Cyberwizard\WatchtowerAgent\Support\Redactor;
 use Cyberwizard\WatchtowerAgent\WatchtowerAgent;
@@ -13,6 +14,11 @@ use Illuminate\Http\Request;
  * wt-auth: authentication events as security signals. Failed and Lockout carry the attempted
  * identifier, read only from the configured identifier keys (never the password or any other
  * credential) and masked like mail recipients by default.
+ *
+ * Failed logins and lockouts are sent immediately (still carrying the execution header) so they
+ * reach Watch Tower even when Nightwatch does not sample the request; repeats of the same
+ * (event, ip, identifier) are throttled to one per auth.throttle_seconds. The other events are
+ * buffered with the execution and follow Nightwatch's sampling.
  */
 class AuthRecorder
 {
@@ -32,6 +38,13 @@ class AuthRecorder
         'Illuminate\Auth\Events\OtherDeviceLogout' => 'other_device_logout',
     ];
 
+    /**
+     * Events sent immediately instead of buffered.
+     *
+     * @var list<string>
+     */
+    public const IMMEDIATE = ['failed', 'lockout'];
+
     public const DEFAULT_IDENTIFIER_KEYS = ['email', 'username', 'login', 'phone'];
 
     public function __construct(private Container $container) {}
@@ -48,40 +61,68 @@ class AuthRecorder
             $recorder = $this->container->make(Recorder::class);
             $execution = $recorder->execution();
 
-            $recorder->inExecution(
-                'wt-auth',
-                fn (): array => $this->payload($event, $name, $execution['execution_source'] ?? null),
-                (int) config('watchtower-agent.auth.max_per_execution', 100),
-            );
+            if ($execution === null) {
+                return;
+            }
+
+            $request = $this->requestFor($event, $name, $execution['execution_source']);
+            $identifier = $this->rawIdentifier($event, $name, $request);
+            $payload = fn (): array => $this->payload($event, $name, $request, $identifier);
+            $limit = (int) config('watchtower-agent.auth.max_per_execution', 100);
+
+            if (! in_array($name, self::IMMEDIATE, true)) {
+                $recorder->inExecution('wt-auth', $payload, $limit);
+
+                return;
+            }
+
+            $throttleKey = "wt-auth|{$name}|".($request?->ip() ?? '').'|'.($identifier ?? '');
+
+            if ($this->container->make(RecordThrottle::class)->allow($throttleKey, (int) config('watchtower-agent.auth.throttle_seconds', 10))) {
+                $recorder->sendInExecution('wt-auth', $payload, $limit);
+            }
         });
     }
 
     /**
      * @return array{event: string, guard: ?string, user_id: ?string, identifier: ?string, ip: ?string, user_agent: ?string, remember: ?bool}
      */
-    private function payload(object $event, string $name, ?string $source): array
+    private function payload(object $event, string $name, ?Request $request, ?string $identifier): array
     {
-        $request = $name === 'lockout' && ($event->request ?? null) instanceof Request
-            ? $event->request
-            : $this->currentRequest($source);
-
-        $identifier = match ($name) {
-            'failed' => $this->identifierFrom(is_array($event->credentials ?? null) ? $event->credentials : []),
-            'lockout' => $request === null ? null : $this->identifierFrom($request->only($this->identifierKeys())),
-            default => null,
-        };
-
         $userAgent = $request?->userAgent();
 
         return [
             'event' => $name,
             'guard' => is_string($event->guard ?? null) ? $event->guard : null,
             'user_id' => $this->userId($event->user ?? null),
-            'identifier' => $identifier,
+            'identifier' => $this->mask($identifier),
             'ip' => $request?->ip(),
             'user_agent' => is_string($userAgent) && $userAgent !== '' ? mb_substr($userAgent, 0, 255) : null,
             'remember' => $name === 'login' ? (bool) ($event->remember ?? false) : null,
         ];
+    }
+
+    /**
+     * The lockout's own request, else the request being handled.
+     */
+    private function requestFor(object $event, string $name, ?string $source): ?Request
+    {
+        return $name === 'lockout' && ($event->request ?? null) instanceof Request
+            ? $event->request
+            : $this->currentRequest($source);
+    }
+
+    /**
+     * The attempted identifier, unmasked (masking happens in the payload; the throttle only
+     * ever sees it hashed). Null for events without one.
+     */
+    private function rawIdentifier(object $event, string $name, ?Request $request): ?string
+    {
+        return match ($name) {
+            'failed' => $this->identifierFrom(is_array($event->credentials ?? null) ? $event->credentials : []),
+            'lockout' => $request === null ? null : $this->identifierFrom($request->only($this->identifierKeys())),
+            default => null,
+        };
     }
 
     /**
@@ -99,19 +140,13 @@ class AuthRecorder
     }
 
     /**
-     * The first configured identifier key with a non-empty string value, masked per mode.
+     * The first configured identifier key with a non-empty string value, trimmed and capped.
      * Nothing else in the array is ever read.
      *
      * @param  array<array-key, mixed>  $values
      */
     private function identifierFrom(array $values): ?string
     {
-        $mode = $this->identifierMode();
-
-        if ($mode === 'none') {
-            return null;
-        }
-
         foreach ($this->identifierKeys() as $key) {
             $value = $values[$key] ?? null;
 
@@ -123,12 +158,22 @@ class AuthRecorder
                 continue;
             }
 
-            $value = mb_substr(trim($value), 0, 255);
-
-            return $mode === 'full' ? $value : Redactor::email($value);
+            return mb_substr(trim($value), 0, 255);
         }
 
         return null;
+    }
+
+    /**
+     * The identifier as recorded, per auth.identifier_mode.
+     */
+    private function mask(?string $identifier): ?string
+    {
+        return match (true) {
+            $identifier === null, $this->identifierMode() === 'none' => null,
+            $this->identifierMode() === 'full' => $identifier,
+            default => Redactor::email($identifier),
+        };
     }
 
     /**

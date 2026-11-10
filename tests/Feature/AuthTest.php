@@ -1,6 +1,9 @@
 <?php
 
+use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
+use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Tests\Support\Contract;
+use Cyberwizard\WatchtowerAgent\Transport;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Events\Login;
@@ -11,11 +14,15 @@ use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Laravel\Nightwatch\Core;
 
 const AUTH_TEST_PASSWORD = 'hunter2-Sup3r-S3cret!';
 
 beforeEach(function () {
     $this->transport = $this->fakeTransport();
+
+    config(['watchtower-agent.auth.throttle_seconds' => 0]);
 });
 
 afterEach(function () {
@@ -24,7 +31,7 @@ afterEach(function () {
 
 function authRecords(object $test): array
 {
-    return $test->transport->bufferedOfType('wt-auth');
+    return [...$test->transport->ofType('wt-auth'), ...$test->transport->bufferedOfType('wt-auth')];
 }
 
 function authUser(int|string $id = 42): GenericUser
@@ -239,7 +246,7 @@ it('records nothing when Nightwatch is not capturing', function () {
 
     event(new Login('web', authUser(), false));
 
-    expect($this->transport->buffered)->toBe([]);
+    expect($this->transport->buffered)->toBe([])->and($this->transport->sent)->toBe([]);
 });
 
 it('caps auth records per execution', function () {
@@ -255,6 +262,70 @@ it('caps auth records per execution', function () {
     event(new Logout('web', authUser()));
 
     expect(authRecords($this))->toHaveCount(3);
+});
+
+it('sends failed logins and lockouts immediately and buffers the rest', function () {
+    bindLoginRequest();
+
+    event(new Failed('web', null, ['email' => 'jane@example.com', 'password' => AUTH_TEST_PASSWORD]));
+    event(new Lockout(bindLoginRequest(['email' => 'jane@example.com'])));
+    event(new Login('web', authUser(), false));
+
+    expect(array_column($this->transport->ofType('wt-auth'), 'event'))->toBe(['failed', 'lockout'])
+        ->and(array_column($this->transport->bufferedOfType('wt-auth'), 'event'))->toBe(['login']);
+
+    foreach ($this->transport->ofType('wt-auth') as $record) {
+        Contract::assertRecord($record, 'wt-auth');
+        expect($record)->toMatchArray($this->transport->execution);
+    }
+});
+
+it('delivers failed logins and lockouts of executions Nightwatch does not sample', function () {
+    $this->app->instance(RecordTransport::class, new Transport($this->app));
+    $this->app->forgetInstance(Recorder::class);
+    app(Core::class)->dontSample();
+
+    event(new Failed('web', null, ['email' => 'jane@example.com', 'password' => AUTH_TEST_PASSWORD]));
+    event(new Lockout(bindLoginRequest(['email' => 'jane@example.com'])));
+
+    $sent = array_values(array_filter($this->ingest->sentNow, fn (array $record): bool => $record['t'] === 'wt-auth'));
+
+    expect(array_column($sent, 'event'))->toBe(['failed', 'lockout'])
+        ->and(array_filter($this->ingest->written, fn (array $record): bool => ($record['t'] ?? null) === 'wt-auth'))->toBe([])
+        ->and($sent[0]['execution_id'])->not->toBe('');
+
+    foreach ($sent as $record) {
+        Contract::assertRecord($record, 'wt-auth');
+        assertNoPassword($record);
+    }
+});
+
+it('throttles repeated failed logins for the same ip and identifier', function () {
+    config(['watchtower-agent.auth.throttle_seconds' => 10]);
+    Carbon::setTestNow('2026-11-10 12:00:00');
+    bindLoginRequest();
+
+    foreach (range(1, 5) as $attempt) {
+        event(new Failed('web', null, ['email' => 'jane@example.com', 'password' => AUTH_TEST_PASSWORD]));
+    }
+
+    // Same mask (j***@example.com), different identifier: its own window.
+    event(new Failed('web', null, ['email' => 'john@example.com', 'password' => AUTH_TEST_PASSWORD]));
+    event(new Lockout(bindLoginRequest(['email' => 'jane@example.com'])));
+
+    foreach (range(1, 3) as $attempt) {
+        event(new Login('web', authUser(), false));
+    }
+
+    expect(array_column($this->transport->ofType('wt-auth'), 'event'))->toBe(['failed', 'failed', 'lockout'])
+        ->and($this->transport->bufferedOfType('wt-auth'))->toHaveCount(3);
+
+    Carbon::setTestNow('2026-11-10 12:00:11');
+    event(new Failed('web', null, ['email' => 'jane@example.com', 'password' => AUTH_TEST_PASSWORD]));
+
+    expect($this->transport->ofType('wt-auth'))->toHaveCount(4);
+
+    Carbon::setTestNow();
 });
 
 it('lists auth in wt-hello only when enabled', function () {

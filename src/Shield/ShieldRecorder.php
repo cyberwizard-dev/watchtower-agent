@@ -3,12 +3,18 @@
 namespace Cyberwizard\WatchtowerAgent\Shield;
 
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
+use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
 use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 
 /**
- * wt-shield: one in-execution record per decision that is not "allow".
+ * wt-shield: one record per decision that is not "allow". Decisions are security signals, so
+ * they are sent immediately (still carrying the execution header) instead of buffered: a
+ * buffered record is dropped with the rest of an execution Nightwatch does not sample. Repeats
+ * of the same (action, rule, ip) are throttled to one per shield.throttle_seconds, and a
+ * decision that is sent also forces Nightwatch to keep the request it was made for
+ * (shield.sample_decisions), so the blocked request itself is visible at most once per window.
  */
 class ShieldRecorder
 {
@@ -17,17 +23,35 @@ class ShieldRecorder
     public function __construct(
         private Recorder $recorder,
         private Container $container,
+        private RecordThrottle $throttle,
     ) {}
 
     public function record(Request $request, string $action, string $rule, string $rulesVersion): void
     {
         Guard::safely(function () use ($request, $action, $rule, $rulesVersion): void {
-            $this->recorder->inExecution(
+            $throttleKey = "wt-shield|{$action}|{$rule}|".(string) $request->ip();
+
+            if (! $this->throttle->allow($throttleKey, (int) config('watchtower-agent.shield.throttle_seconds', 10), $this->cacheStore())) {
+                return;
+            }
+
+            $sent = $this->recorder->sendInExecution(
                 'wt-shield',
                 fn (): array => $this->payload($request, $action, $rule, $rulesVersion),
                 (int) config('watchtower-agent.shield.max_per_execution', 10),
             );
+
+            if ($sent && (bool) config('watchtower-agent.shield.sample_decisions', true)) {
+                $this->recorder->sampleExecution();
+            }
         });
+    }
+
+    private function cacheStore(): ?string
+    {
+        $store = config('watchtower-agent.shield.cache_store');
+
+        return is_string($store) && $store !== '' ? $store : null;
     }
 
     /**

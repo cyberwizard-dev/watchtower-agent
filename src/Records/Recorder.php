@@ -84,4 +84,39 @@ class Recorder
             return true;
         }, false);
     }
+
+    /**
+     * Like inExecution(), but sent immediately with writeNow() instead of buffered, so the
+     * record reaches Watch Tower even when Nightwatch does not sample the execution (buffers of
+     * unsampled executions are dropped). For security signals that must never be sampled away;
+     * callers throttle them. Returns false when the record was not handed over.
+     *
+     * @param  array<string, mixed>|(Closure(): array<string, mixed>)  $payload  a closure is only built when the record will be sent
+     */
+    public function sendInExecution(string $type, array|Closure $payload, int $limit = 0): bool
+    {
+        $execution = $this->execution();
+
+        if ($execution === null || ! $this->limiter->allow($type, $execution['execution_id'], $limit)) {
+            return false;
+        }
+
+        return Guard::safely(function () use ($type, $payload, $execution): bool {
+            $payload = $payload instanceof Closure ? $payload() : $payload;
+
+            return $this->transport->send($this->factory->make($type, [...$execution, ...$payload]));
+        }, false);
+    }
+
+    /**
+     * Force Nightwatch to keep the current execution regardless of its sample rate.
+     */
+    public function sampleExecution(): void
+    {
+        if (! WatchtowerAgent::enabled()) {
+            return;
+        }
+
+        Guard::safely(fn () => $this->transport->sample());
+    }
 }

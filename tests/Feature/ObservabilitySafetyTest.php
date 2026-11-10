@@ -28,6 +28,11 @@ it('never lets a failing transport break the host app', function () {
         {
             return ['trace_id' => 't', 'execution_source' => 'request', 'execution_id' => 'e', 'execution_stage' => 'action', 'user' => ''];
         }
+
+        public function sample(): void
+        {
+            throw new RuntimeException('sample broke');
+        }
     });
     $this->app->forgetInstance(Recorder::class);
 
