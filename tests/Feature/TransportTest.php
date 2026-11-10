@@ -81,3 +81,22 @@ it('falls back to the hostname and an empty deploy', function () {
 
     expect($record['deploy'])->toBe('')->and($record['server'])->toBe((string) gethostname());
 });
+
+it('forces Nightwatch to keep the current execution', function () {
+    $core = app(Core::class);
+    $core->dontSample();
+
+    app(Transport::class)->sample();
+
+    expect($core->sampling())->toBeTrue();
+});
+
+it('does not force sampling when Nightwatch is paused', function () {
+    $core = app(Core::class);
+    $core->dontSample();
+    $core->pause();
+
+    app(Transport::class)->sample();
+
+    expect($core->sampling())->toBeFalse();
+});

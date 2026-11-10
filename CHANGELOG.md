@@ -2,6 +2,18 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-10
+
+### Fixed
+
+- `wt-shield` decisions were buffered with the execution, so Nightwatch dropped them for every request its sample rate skipped (with `NIGHTWATCH_REQUEST_SAMPLE_RATE=0.1`, nine blocked requests in ten were never reported). Decisions are now sent immediately with `writeNow()`, still carrying the execution header and still capped per execution.
+- `wt-auth` `failed` and `lockout` records are sent immediately for the same reason; the other auth events stay buffered.
+
+### Added
+
+- Throttle for immediate security records: at most one `wt-shield` record per (action, rule, IP) and one `failed`/`lockout` per (event, IP, identifier) every 10 seconds, shared across processes through the cache (`shield.throttle_seconds` / `WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS`, `auth.throttle_seconds` / `WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS`, `0` = off). Records carry no count, so Watch Tower's hit counters count windows during an attack.
+- A sent Shield decision forces Nightwatch to keep the request it was made for (`Core::sample(1.0)` through `Transport::sample()`), so the blocked request itself is visible; `shield.sample_decisions` / `WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS=false` turns it off.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added
@@ -50,5 +62,7 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 - Query bindings. Nightwatch 1.x offers no reliable key to correlate a query record with its bindings; the `bindings` flag is reserved and never reported as enabled.
 
+[0.3.1]: https://github.com/cyberwizard-dev/watchtower-agent/releases/tag/v0.3.1
+[0.3.0]: https://github.com/cyberwizard-dev/watchtower-agent/releases/tag/v0.3.0
 [0.2.0]: https://github.com/cyberwizard-dev/watchtower-agent/releases/tag/v0.2.0
 [0.1.0]: https://github.com/cyberwizard-dev/watchtower-agent/releases/tag/v0.1.0

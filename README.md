@@ -97,8 +97,11 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_TRACE_OUTGOING` / `_INCOMING` | `true` | Each direction of trace context. |
 | `WATCHTOWER_AGENT_AUTH_IDENTIFIER` | `masked` | Attempted login identifier: `masked` (`j***@example.com`), `full` or `none`. |
 | `WATCHTOWER_AGENT_AUTH_IDENTIFIER_KEYS` | `email,username,login,phone` | Credential / request keys the identifier is read from. Nothing else is read. |
+| `WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS` | `10` | At most one `failed`/`lockout` record per event, IP and identifier in this window (`0` = every one). |
 | `WATCHTOWER_AGENT_SHIELD` | `false` | Shield: bot and spam protection from rules managed in Watch Tower. |
 | `WATCHTOWER_AGENT_SHIELD_MODE` | rules' mode | `monitor` or `enforce`, overriding the mode Watch Tower sends. |
+| `WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS` | `10` | At most one `wt-shield` record per action, rule and IP in this window (`0` = every one). |
+| `WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS` | `true` | A decision that is sent also makes Nightwatch keep the request it was made for, whatever the request sample rate. |
 | `WATCHTOWER_AGENT_SHIELD_TIMEOUT` | `2` | Seconds for the rules pull (connect and total). |
 | `WATCHTOWER_AGENT_SHIELD_CACHE_STORE` | default store | Store for the rules, rate limit counters and penalties. Use a shared store (Redis) with several servers. |
 | `WATCHTOWER_AGENT_SHIELD_PASS_MINUTES` | `30` | Lifetime of the `wt_shield_pass` cookie after a solved challenge. |
@@ -146,7 +149,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `shield` (off by default) | `wt-shield` | Every Shield decision that is not "allow". |
 | — | `wt-hello` | Hourly and on demand: package, Laravel and PHP versions and the enabled features. |
 
-Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, HTTP, webhooks, trace links, auth events) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records. Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
+Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, HTTP, webhooks, trace links, auth events) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records (except Shield decisions and failed logins/lockouts, which are sent immediately). Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
 
 ## What Nightwatch can't do, and what this adds
 
@@ -318,7 +321,7 @@ With spatie/laravel-webhook-server installed, each `WebhookCallSucceededEvent` a
 
 ## Authentication events
 
-`wt-auth` turns Laravel's auth events into security signals, buffered with the request or job that raised them:
+`wt-auth` turns Laravel's auth events into security signals. They carry the execution header of the request or job that raised them; failed logins and lockouts are sent immediately (see [Security signals and sampling](#security-signals-and-sampling)), the other events are buffered with the execution:
 
 | `event` | Source |
 |---|---|
@@ -353,7 +356,15 @@ Off by default (`WATCHTOWER_AGENT_SHIELD=true`). Shield is a global middleware t
 
 **Monitor mode** blocks nothing: what would have been blocked, rate limited or challenged is reported as `would_block`. `WATCHTOWER_AGENT_SHIELD_MODE` overrides the mode Watch Tower sends.
 
-Each decision that is not "allow" is one `wt-shield` record (`blocked`, `rate_limited`, `challenged`, `challenge_passed`, `challenge_failed`, `honeypot`, `would_block`) with the rule (`ip:198.51.100.7/32`, `ua`, `path:/.env`, `rate:login`, `honeypot`, `challenge`), IP, method, path, user agent, user id (only when a guard already resolved one) and the rules version. The rules pull and siteverify calls are the agent's own: no `wt-http`, no traceparent, and the cache bookkeeping is invisible to Nightwatch's cache sensor.
+Each decision that is not "allow" is one `wt-shield` record (`blocked`, `rate_limited`, `challenged`, `challenge_passed`, `challenge_failed`, `honeypot`, `would_block`) with the rule (`ip:198.51.100.7/32`, `ua`, `path:/.env`, `rate:login`, `honeypot`, `challenge`), IP, method, path, user agent, user id (only when a guard already resolved one) and the rules version. The rules pull and siteverify calls are the agent's own: no `wt-http`, no traceparent, and the cache bookkeeping is invisible to Nightwatch's cache sensor. Decisions are sent immediately and throttled, see below.
+
+### Security signals and sampling
+
+Nightwatch drops the buffered records of every execution its sample rate skips (`NIGHTWATCH_REQUEST_SAMPLE_RATE=0.1` keeps one request in ten). A security signal must not depend on that, so `wt-shield` decisions and `wt-auth` `failed`/`lockout` records are sent immediately with `writeNow()`, still carrying the execution header and still capped per execution. A buffered record would only arrive for sampled requests.
+
+So a client hammering the app doesn't cost one write per request, repeats are throttled: at most one `wt-shield` record per (action, rule, IP) and one `failed`/`lockout` record per (event, IP, identifier) every 10 seconds (`WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS`, `WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS`, `0` sends every one). The window is kept in the cache (the Shield cache store for decisions, the default store for auth), so it is shared by all PHP-FPM processes, and in memory for long-running ones. Records carry no count, so during an attack Watch Tower sees one decision per window and its rule hit counters count windows, not requests.
+
+When a decision is sent, Shield also calls Nightwatch's `sample()` so the request it was made for is kept (its request record, and anything else Nightwatch buffered); throttled decisions don't, so this adds at most one sampled request per window. Turn it off with `WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS=false`.
 
 ## Commands
 
@@ -370,7 +381,7 @@ Set `WATCHTOWER_AGENT_SCHEDULE_COMMANDS=false` to schedule them yourself.
 
 ## How records are sent
 
-Records go through Nightwatch's existing connection to its local agent, which forwards them to Watch Tower with everything else. Records produced outside a request, command or job (the registry, snapshots, heartbeats, health, catch-up, outages, action results) are sent immediately with Nightwatch's `writeNow()`, because Nightwatch has already finished with the current execution when the scheduler or worker events fire, and anything buffered then is dropped. In-execution records are buffered with `write()` and flushed by Nightwatch with the execution; per-execution summaries are emitted before Nightwatch digests (request terminating, `CommandFinished`, `ScheduledTaskFinished`/`Failed`, the end of each job).
+Records go through Nightwatch's existing connection to its local agent, which forwards them to Watch Tower with everything else. Records produced outside a request, command or job (the registry, snapshots, heartbeats, health, catch-up, outages, action results) are sent immediately with Nightwatch's `writeNow()`, because Nightwatch has already finished with the current execution when the scheduler or worker events fire, and anything buffered then is dropped. In-execution records are buffered with `write()` and flushed by Nightwatch with the execution (Shield decisions and failed logins/lockouts are the exception, see [Security signals and sampling](#security-signals-and-sampling)); per-execution summaries are emitted before Nightwatch digests (request terminating, `CommandFinished`, `ScheduledTaskFinished`/`Failed`, the end of each job).
 
 All of this sits in one class, `Cyberwizard\WatchtowerAgent\Transport`, which is also the only class that reads Nightwatch's execution state for the execution header. It does nothing when Nightwatch isn't installed, is disabled or is paused, and it never throws. A recursion guard keeps the agent from observing itself. Listeners catch their own errors and hand them to `report()`, so the agent can't break a request, a job or the scheduler. Records hold only scalars and arrays.
 

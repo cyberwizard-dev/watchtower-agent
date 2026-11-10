@@ -31,6 +31,7 @@ use Cyberwizard\WatchtowerAgent\Queue\QueuePayload;
 use Cyberwizard\WatchtowerAgent\Records\ExecutionLimiter;
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Records\RecordFactory;
+use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
 use Cyberwizard\WatchtowerAgent\Shield\Evaluator;
 use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
 use Cyberwizard\WatchtowerAgent\Shield\PassCookie;
@@ -83,6 +84,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->app->singleton(OutputCapture::class);
         $this->app->singleton(CatchupReporter::class);
         $this->app->singleton(ExecutionLimiter::class);
+        $this->app->singleton(RecordThrottle::class);
         $this->app->singleton(EventRecorder::class);
         $this->app->singleton(JobLifecycle::class);
         $this->app->singleton(BroadcastRecorder::class);

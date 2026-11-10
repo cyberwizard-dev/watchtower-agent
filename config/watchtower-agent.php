@@ -104,6 +104,7 @@ return [
         'max_payload_bytes' => (int) env('WATCHTOWER_AGENT_BROADCASTS_MAX_PAYLOAD_BYTES', 8192),
         'ignore_drivers' => $csv(env('WATCHTOWER_AGENT_BROADCASTS_IGNORE_DRIVERS')) ?? ['null'],
         'max_per_execution' => 100,
+        'throttle_seconds' => (int) env('WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS', 10),
     ],
 
     /*
@@ -121,6 +122,7 @@ return [
         'keys' => env('WATCHTOWER_AGENT_CACHE_KEYS', 'masked'),
         'locks' => (bool) env('WATCHTOWER_AGENT_CACHE_LOCKS', false),
         'max_per_execution' => 100,
+        'throttle_seconds' => (int) env('WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS', 10),
     ],
 
     /*
@@ -140,6 +142,7 @@ return [
         'preview' => (bool) env('WATCHTOWER_AGENT_MAIL_PREVIEW', false),
         'capture_failures' => (bool) env('WATCHTOWER_AGENT_MAIL_CAPTURE_FAILURES', true),
         'max_per_execution' => 100,
+        'throttle_seconds' => (int) env('WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS', 10),
     ],
 
     /*
@@ -220,6 +223,9 @@ return [
     | failed login or lockout is read only from identifier_keys (keys matching
     | the redaction pattern are ignored; the password is never read) and sent
     | per identifier_mode: "masked" (j***@example.com), "full" or "none".
+    | Failed logins and lockouts are sent immediately, so they arrive even when
+    | Nightwatch does not sample the request; the same (event, ip, identifier)
+    | is sent at most once per throttle_seconds (0 = every one).
     |
     */
 
@@ -227,6 +233,7 @@ return [
         'identifier_mode' => env('WATCHTOWER_AGENT_AUTH_IDENTIFIER', 'masked'),
         'identifier_keys' => $csv(env('WATCHTOWER_AGENT_AUTH_IDENTIFIER_KEYS')) ?? ['email', 'username', 'login', 'phone'],
         'max_per_execution' => 100,
+        'throttle_seconds' => (int) env('WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS', 10),
     ],
 
     /*
@@ -241,6 +248,10 @@ return [
     | miss. Without rules every request is allowed (fail open). mode_override
     | ("monitor" or "enforce") replaces the mode Watch Tower sends.
     | turnstile_secret comes from the app's env and never from Watch Tower.
+    | Decisions are sent immediately, so they arrive even when Nightwatch does
+    | not sample the request; the same (action, rule, ip) is sent at most once
+    | per throttle_seconds (0 = every one), and with sample_decisions a sent
+    | decision makes Nightwatch keep that request.
     |
     */
 
@@ -254,6 +265,8 @@ return [
         'pass_minutes' => (int) env('WATCHTOWER_AGENT_SHIELD_PASS_MINUTES', 30),
         'honeypot_field' => env('WATCHTOWER_AGENT_SHIELD_HONEYPOT_FIELD', 'wt_hp_website'),
         'max_per_execution' => 10,
+        'throttle_seconds' => (int) env('WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS', 10),
+        'sample_decisions' => (bool) env('WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS', true),
     ],
 
     /*

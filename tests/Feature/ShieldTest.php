@@ -1,12 +1,17 @@
 <?php
 
 use Cyberwizard\WatchtowerAgent\Console\HelloCommand;
+use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
+use Cyberwizard\WatchtowerAgent\Records\Recorder;
+use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
 use Cyberwizard\WatchtowerAgent\Shield\PassCookie;
 use Cyberwizard\WatchtowerAgent\Shield\Patterns;
 use Cyberwizard\WatchtowerAgent\Shield\RulesRepository;
 use Cyberwizard\WatchtowerAgent\Shield\ShieldMiddleware;
+use Cyberwizard\WatchtowerAgent\Shield\ShieldRecorder;
 use Cyberwizard\WatchtowerAgent\Shield\ShieldRules;
 use Cyberwizard\WatchtowerAgent\Tests\Support\Contract;
+use Cyberwizard\WatchtowerAgent\Transport;
 use Cyberwizard\WatchtowerAgent\WatchtowerAgent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Http\Kernel;
@@ -17,6 +22,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
+use Laravel\Nightwatch\Core;
 
 const SHIELD_RULES_URL = 'https://watchtower.test/api/shield/v1/rules';
 const SHIELD_SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -30,6 +36,7 @@ beforeEach(function () {
         'watchtower-agent.shield.token' => 'env-token',
         'watchtower-agent.shield.turnstile_secret' => 'turnstile-secret',
         'watchtower-agent.shield.max_per_execution' => 1000,
+        'watchtower-agent.shield.throttle_seconds' => 0,
     ]);
 
     Route::any('{path?}', function () {
@@ -78,7 +85,7 @@ function cacheShieldRules(array $overrides = [], ?int $fetchedAt = null): void
 
 function shieldRecords(object $test): array
 {
-    return $test->transport->bufferedOfType('wt-shield');
+    return $test->transport->ofType('wt-shield');
 }
 
 function loginLimit(array $overrides = []): array
@@ -503,6 +510,105 @@ it('respects trusted proxies when reading the client IP', function () {
     fromIp($this, '10.0.0.2')->withHeaders(['X-Forwarded-For' => '198.51.100.7'])->get('/')->assertForbidden();
 
     expect(shieldRecords($this)[0]['ip'])->toBe('198.51.100.7');
+});
+
+describe('delivery', function () {
+    beforeEach(function () {
+        cacheShieldRules(['block' => ['ips' => [['cidr' => '198.51.100.0/24', 'reason' => null, 'expires_at' => null]]]]);
+    });
+
+    it('sends decisions immediately instead of buffering them', function () {
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+
+        expect($this->transport->ofType('wt-shield'))->toHaveCount(1)
+            ->and($this->transport->bufferedOfType('wt-shield'))->toBe([])
+            ->and($this->transport->ofType('wt-shield')[0])->toMatchArray($this->transport->execution);
+    });
+
+    it('delivers decisions of requests Nightwatch does not sample, and keeps the request', function () {
+        $this->app->instance(RecordTransport::class, new Transport($this->app));
+        $this->app->forgetInstance(Recorder::class);
+        $this->app->forgetInstance(ShieldRecorder::class);
+        // Testbench runs Nightwatch in its console state, so drop the sample directly.
+        app(Core::class)->dontSample();
+
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+
+        $sent = array_values(array_filter($this->ingest->sentNow, fn (array $record): bool => $record['t'] === 'wt-shield'));
+        $buffered = array_values(array_filter($this->ingest->written, fn (array $record): bool => ($record['t'] ?? null) === 'wt-shield'));
+
+        expect($sent)->toHaveCount(1)
+            ->and($buffered)->toBe([])
+            ->and($sent[0]['action'])->toBe('blocked')
+            ->and($sent[0]['execution_id'])->not->toBe('')
+            ->and(app(Core::class)->sampling())->toBeTrue();
+        Contract::assertRecord($sent[0], 'wt-shield');
+    });
+
+    it('leaves sampling alone when sample_decisions is off', function () {
+        config(['watchtower-agent.shield.sample_decisions' => false]);
+        $this->app->instance(RecordTransport::class, new Transport($this->app));
+        $this->app->forgetInstance(Recorder::class);
+        $this->app->forgetInstance(ShieldRecorder::class);
+        app(Core::class)->dontSample();
+
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+
+        expect(array_column($this->ingest->sentNow, 't'))->toContain('wt-shield')
+            ->and(app(Core::class)->sampling())->toBeFalse();
+    });
+
+    it('throttles repeats of the same action, rule and ip', function () {
+        config(['watchtower-agent.shield.throttle_seconds' => 10]);
+        Carbon::setTestNow('2026-11-10 12:00:00');
+
+        foreach (range(1, 5) as $attempt) {
+            fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+        }
+
+        fromIp($this, '198.51.100.8')->get('/')->assertForbidden();
+
+        expect(array_column(shieldRecords($this), 'ip'))->toBe(['198.51.100.7', '198.51.100.8'])
+            ->and($this->transport->sampled)->toBe(2);
+
+        Carbon::setTestNow('2026-11-10 12:00:09');
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+        expect(shieldRecords($this))->toHaveCount(2);
+
+        Carbon::setTestNow('2026-11-10 12:00:11');
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+        expect(shieldRecords($this))->toHaveCount(3)
+            ->and($this->transport->sampled)->toBe(3);
+    });
+
+    it('shares the throttle window between processes through the cache', function () {
+        config(['watchtower-agent.shield.throttle_seconds' => 10]);
+
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+
+        // A fresh process (PHP-FPM keeps nothing between requests) still sees the window.
+        app(RecordThrottle::class)->reset();
+        fromIp($this, '198.51.100.7')->get('/')->assertForbidden();
+
+        expect(shieldRecords($this))->toHaveCount(1);
+    });
+
+    it('still caps decisions per execution', function () {
+        config(['watchtower-agent.shield.max_per_execution' => 2]);
+        $request = Request::create('/', 'GET', server: ['REMOTE_ADDR' => '198.51.100.7']);
+
+        foreach (range(1, 5) as $attempt) {
+            app(ShieldRecorder::class)->record($request, 'blocked', "ip:rule-{$attempt}", 'v1');
+        }
+
+        expect(shieldRecords($this))->toHaveCount(2)
+            ->and($this->transport->sampled)->toBe(2);
+
+        $this->transport->newExecution('00000000-0000-4000-8000-000000000002');
+        app(ShieldRecorder::class)->record($request, 'blocked', 'ip:rule-6', 'v1');
+
+        expect(shieldRecords($this))->toHaveCount(3);
+    });
 });
 
 it('does nothing when the feature is off', function () {

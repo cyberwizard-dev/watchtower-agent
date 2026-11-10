@@ -27,4 +27,11 @@ interface RecordTransport
      * @return array{trace_id: string, execution_source: string, execution_id: string, execution_stage: string, user: string}|null
      */
     public function execution(): ?array;
+
+    /**
+     * Make Nightwatch keep the execution it is currently capturing, whatever its sample rate
+     * decided, so the buffered records (the request itself, its queries, ...) are digested
+     * instead of dropped. Does nothing when Nightwatch is missing, disabled or paused.
+     */
+    public function sample(): void;
 }

@@ -44,6 +44,14 @@ class FakeTransport implements RecordTransport
         return $this->execution;
     }
 
+    /** How many times the current execution was forced into the sample. */
+    public int $sampled = 0;
+
+    public function sample(): void
+    {
+        $this->sampled++;
+    }
+
     /**
      * Buffered records of one type.
      *
