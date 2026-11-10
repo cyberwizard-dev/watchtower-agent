@@ -24,6 +24,8 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Mail](#mail)
 - [Outgoing HTTP and trace context](#outgoing-http-and-trace-context)
 - [Webhooks](#webhooks)
+- [Authentication events](#authentication-events)
+- [Shield (bot and spam protection)](#shield-bot-and-spam-protection)
 - [Commands](#commands)
 - [How records are sent](#how-records-are-sent)
 - [Testing](#testing)
@@ -72,6 +74,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_HTTP` | `true` | Outgoing HTTP enrichment. |
 | `WATCHTOWER_AGENT_WEBHOOKS` | `true` | Incoming webhooks and outgoing webhook tagging. |
 | `WATCHTOWER_AGENT_TRACE_CONTEXT` | `true` | W3C `traceparent` out and in. |
+| `WATCHTOWER_AGENT_AUTH` | `true` | Authentication events (security signals). |
 | `WATCHTOWER_AGENT_EVENTS_LISTENER_TIMING` | `true` | Instrument the dispatcher to time listeners; `false` records dispatches only. |
 | `WATCHTOWER_AGENT_EVENTS_ALLOW` / `_DENY` | none | Comma-separated event name patterns. Allow wins over every deny. |
 | `WATCHTOWER_AGENT_EVENTS_SAMPLE_RATE` | `1.0` | Fraction of captured events recorded. |
@@ -92,6 +95,15 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_WEBHOOKS_DUPLICATE_TTL` | `86400` | Seconds a delivery id is remembered. |
 | `WATCHTOWER_AGENT_WEBHOOKS_CACHE_STORE` | default store | Store for delivery ids. |
 | `WATCHTOWER_AGENT_TRACE_OUTGOING` / `_INCOMING` | `true` | Each direction of trace context. |
+| `WATCHTOWER_AGENT_AUTH_IDENTIFIER` | `masked` | Attempted login identifier: `masked` (`j***@example.com`), `full` or `none`. |
+| `WATCHTOWER_AGENT_AUTH_IDENTIFIER_KEYS` | `email,username,login,phone` | Credential / request keys the identifier is read from. Nothing else is read. |
+| `WATCHTOWER_AGENT_SHIELD` | `false` | Shield: bot and spam protection from rules managed in Watch Tower. |
+| `WATCHTOWER_AGENT_SHIELD_MODE` | rules' mode | `monitor` or `enforce`, overriding the mode Watch Tower sends. |
+| `WATCHTOWER_AGENT_SHIELD_TIMEOUT` | `2` | Seconds for the rules pull (connect and total). |
+| `WATCHTOWER_AGENT_SHIELD_CACHE_STORE` | default store | Store for the rules, rate limit counters and penalties. Use a shared store (Redis) with several servers. |
+| `WATCHTOWER_AGENT_SHIELD_PASS_MINUTES` | `30` | Lifetime of the `wt_shield_pass` cookie after a solved challenge. |
+| `WATCHTOWER_AGENT_SHIELD_HONEYPOT_FIELD` | `wt_hp_website` | Honeypot field name until Watch Tower sends one. |
+| `TURNSTILE_SECRET` | none | Cloudflare Turnstile secret. Without it challenges become 429s. Never sent by Watch Tower. |
 | `WATCHTOWER_AGENT_REDACT_KEY_PATTERN` | Watch Tower's pattern | Keys whose values are masked in payloads, headers and query strings. |
 | `WATCHTOWER_AGENT_SCHEDULE_COMMANDS` | `true` | Add the agent's commands to the schedule. |
 | `WATCHTOWER_AGENT_QUEUE_LIST` | default connection's default queue | Comma-separated `connection:queue` pairs to measure. |
@@ -130,9 +142,11 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `http` | `wt-http` | Every outgoing request attempt (Laravel Http client and Guzzle with the middleware). |
 | `webhooks` | `wt-webhook-in`, `wt-http.webhook` | Each request through `watchtower.webhook:{source}`; outgoing webhooks tagged. |
 | `trace_context` | `wt-trace-link` | A request that arrives with a `traceparent`. |
+| `auth` | `wt-auth` | Login, failed login, lockout, logout, password reset, registration, e-mail verification, other-device logout. |
+| `shield` (off by default) | `wt-shield` | Every Shield decision that is not "allow". |
 | — | `wt-hello` | Hourly and on demand: package, Laravel and PHP versions and the enabled features. |
 
-Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, HTTP, webhooks, trace links) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records. Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
+Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, HTTP, webhooks, trace links, auth events) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records. Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
 
 ## What Nightwatch can't do, and what this adds
 
@@ -302,6 +316,45 @@ Http::withWatchtowerWebhook('order.paid', 'acme-erp')->post($url, $payload);
 
 With spatie/laravel-webhook-server installed, each `WebhookCallSucceededEvent` and `WebhookCallFailedEvent` becomes a tagged `wt-http` (attempt, status, timing from the transfer stats; the event name from `meta.event`, the payload's `event` or `type`). Spatie sends with its own Guzzle client, so these don't duplicate the Http middleware.
 
+## Authentication events
+
+`wt-auth` turns Laravel's auth events into security signals, buffered with the request or job that raised them:
+
+| `event` | Source |
+|---|---|
+| `login` | `Illuminate\Auth\Events\Login` (with `remember`) |
+| `failed` | `Failed` |
+| `lockout` | `Lockout` (the login throttle tripped) |
+| `logout` | `Logout` |
+| `password_reset` | `PasswordReset` |
+| `registered` | `Registered` |
+| `verified` | `Verified` |
+| `other_device_logout` | `OtherDeviceLogout` |
+
+Each record has the `guard` (when the event has one), the `user_id` (`getAuthIdentifier()` of the event's user, including the user a failed attempt matched), the client `ip` and `user_agent` (at most 255 characters) and, for failed logins and lockouts, the attempted `identifier`. IP and user agent come from the current request only when Nightwatch is capturing an HTTP request; a lockout uses the request it carries. The IP is `$request->ip()`, so configure trusted proxies or every login comes from your load balancer.
+
+**The password is never read.** For `Failed` the agent looks only at the keys in `auth.identifier_keys` (default `email`, `username`, `login`, `phone`) in the credentials array, and for `Lockout` only at those keys in the request input; any configured key that matches the redaction pattern (`password`, `secret`, `token`, ...) is ignored. The first non-empty value is sent masked like mail recipients (`j***@example.com`, `j***` for a username), in full with `WATCHTOWER_AGENT_AUTH_IDENTIFIER=full`, or not at all with `none`. Auth records are capped at 100 per execution.
+
+## Shield (bot and spam protection)
+
+Off by default (`WATCHTOWER_AGENT_SHIELD=true`). Shield is a global middleware that applies rules you manage in Watch Tower before the app sees the request. It runs right after `TrustProxies` (and Nightwatch's own middleware), so `$request->ip()` is the client and the request is still captured by Nightwatch.
+
+**Rules.** `watchtower:shield-sync` pulls `GET {NIGHTWATCH_BASE_URL}/api/shield/v1/rules` with `NIGHTWATCH_TOKEN` every minute (2 s timeout, `If-None-Match` so unchanged rules are a 304) into the app cache. The copy is used for its `ttl_seconds`; a stale or missing copy is refreshed **after** the response is sent, never during a request, and at most once per 15 seconds across processes. The last good copy is kept when Watch Tower is unreachable. With no copy at all every request is allowed: Shield fails open, and an error inside Shield also lets the request through.
+
+**Order.** Allow list (wins over everything) → blocked IPs (IPv4/IPv6 CIDR, expired entries ignored) → user agent expressions (PCRE without delimiters; invalid expressions are skipped, matching is capped at 1 KB and a low backtracking limit) → path globs (`*` matches across `/`, case-insensitive, on the decoded path with duplicate slashes collapsed) → rate limits → honeypot → challenge.
+
+**Rate limits** count matching requests (methods, path globs) in a fixed window per `by`: `ip`, `ip_path`, or `user`. Shield runs before sessions start, so `user` is only known for guards that need no session (API tokens); otherwise it counts by IP. Past the limit the client gets 429 with `Retry-After`, for `block_seconds` when set.
+
+**Responses.** 403 (`Forbidden.`) for blocks, 429 (`Too Many Requests.`) with `Retry-After` for rate limits; JSON (`{"message": ...}`) when the client wants JSON. Bodies never name the rule.
+
+**Challenge.** A rate limit with `action: challenge` shows a browser GET (an `Accept` with `text/html`, not XHR) a Turnstile interstitial (status 429, `Cache-Control: no-store`). The widget posts to `POST /_watchtower/shield/verify`, which checks the token with Cloudflare's siteverify using `TURNSTILE_SECRET` from your env, sets the `wt_shield_pass` cookie (HMAC of expiry and client IP with the app key, 30 minutes, HttpOnly, SameSite=Lax) and redirects back to the same-site path. While the cookie is valid, challenge limits let the client through. JSON and other non-browser requests, or an app without `TURNSTILE_SECRET`, get the 429 instead. The verify route allows 20 attempts per IP per minute; an unreachable siteverify counts as a failed check.
+
+**Honeypot.** Put `@watchtowerHoneypot` (or `{!! \Cyberwizard\WatchtowerAgent\WatchtowerAgent::honeypotField() !!}`) in your forms. It renders a text input moved off screen, `aria-hidden`, `tabindex="-1"` and `autocomplete="off"`, named after the rules' `honeypot.field`. A POST with that field filled is blocked (`action: block`) or only reported (`action: flag`).
+
+**Monitor mode** blocks nothing: what would have been blocked, rate limited or challenged is reported as `would_block`. `WATCHTOWER_AGENT_SHIELD_MODE` overrides the mode Watch Tower sends.
+
+Each decision that is not "allow" is one `wt-shield` record (`blocked`, `rate_limited`, `challenged`, `challenge_passed`, `challenge_failed`, `honeypot`, `would_block`) with the rule (`ip:198.51.100.7/32`, `ua`, `path:/.env`, `rate:login`, `honeypot`, `challenge`), IP, method, path, user agent, user id (only when a guard already resolved one) and the rules version. The rules pull and siteverify calls are the agent's own: no `wt-http`, no traceparent, and the cache bookkeeping is invisible to Nightwatch's cache sensor.
+
 ## Commands
 
 | Command | Schedule |
@@ -311,6 +364,7 @@ With spatie/laravel-webhook-server installed, each `WebhookCallSucceededEvent` a
 | `watchtower:queue-snapshot` | every minute |
 | `watchtower:health-report` | every minute (`-v` prints the results) |
 | `watchtower:actions` | every minute, only when actions are enabled |
+| `watchtower:shield-sync` | every minute, only when Shield is enabled |
 
 Set `WATCHTOWER_AGENT_SCHEDULE_COMMANDS=false` to schedule them yourself.
 

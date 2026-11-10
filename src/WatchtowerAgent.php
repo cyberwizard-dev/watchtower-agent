@@ -5,13 +5,14 @@ namespace Cyberwizard\WatchtowerAgent;
 use Closure;
 use Cyberwizard\WatchtowerAgent\Health\HealthCheckRegistry;
 use Cyberwizard\WatchtowerAgent\Http\HttpRecorder;
+use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
 use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Cyberwizard\WatchtowerAgent\Webhooks\RecordIncomingWebhook;
 use Cyberwizard\WatchtowerAgent\Webhooks\WebhookState;
 
 class WatchtowerAgent
 {
-    public const VERSION = '0.2.0';
+    public const VERSION = '0.3.0';
 
     /**
      * Every feature the package knows about, in the order the hello record lists them.
@@ -20,7 +21,7 @@ class WatchtowerAgent
      */
     public const FEATURES = [
         'schedule', 'queues', 'workers', 'output', 'catchup', 'health', 'bindings', 'actions',
-        'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context',
+        'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context', 'auth', 'shield',
     ];
 
     /**
@@ -65,6 +66,15 @@ class WatchtowerAgent
                 $state->signature = $result;
             }
         });
+    }
+
+    /**
+     * The hidden Shield honeypot input (what @watchtowerHoneypot renders); empty when Shield is
+     * off. Put it inside forms you want protected from spam bots.
+     */
+    public static function honeypotField(): string
+    {
+        return Honeypot::render();
     }
 
     public static function enabled(): bool

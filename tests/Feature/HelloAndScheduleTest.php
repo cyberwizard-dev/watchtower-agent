@@ -19,7 +19,7 @@ it('sends wt-hello and the schedule', function () {
     Contract::assertRecord($hello[0], 'wt-hello');
     expect($hello[0]['features'])->toBe([
         'schedule', 'queues', 'workers', 'output', 'catchup', 'health',
-        'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context',
+        'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context', 'auth',
     ])
         ->and($hello[0]['laravel_version'])->toBe(app()->version())
         ->and($hello[0]['schedule_catchup_version'])->toBeString()
