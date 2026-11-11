@@ -2,11 +2,14 @@
 
 use Cyberwizard\WatchtowerAgent\Browser\BrowserProxyController;
 use Cyberwizard\WatchtowerAgent\Browser\BrowserTag;
+use Cyberwizard\WatchtowerAgent\WatchtowerAgentServiceProvider;
+use Illuminate\Cache\RateLimiter as RateLimiterInstance;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 
 beforeEach(function () {
     config([
@@ -82,4 +85,20 @@ it('answers 404 until browser monitoring is configured', function () {
     $this->call('POST', '/_t/e', [], [], [], ['CONTENT_TYPE' => 'text/plain'], '{"events":[]}')->assertNotFound();
 
     Http::assertNothingSent();
+});
+
+it('defines its rate limiter even when the routes come from the route cache', function () {
+    // route:cache makes the provider skip registering routes, but the cached beacon route
+    // still runs ThrottleRequests::using('watchtower-browser') on every request.
+    app()->instance('routes.cached', true);
+    app()->instance(RateLimiterInstance::class, new RateLimiterInstance(app('cache')->store()));
+    RateLimiter::clearResolvedInstances();
+
+    expect(app()->routesAreCached())->toBeTrue()
+        ->and(RateLimiter::limiter('watchtower-browser'))->toBeNull();
+
+    (new ReflectionMethod(WatchtowerAgentServiceProvider::class, 'registerBrowser'))
+        ->invoke(new WatchtowerAgentServiceProvider(app()));
+
+    expect(RateLimiter::limiter('watchtower-browser'))->not->toBeNull();
 });

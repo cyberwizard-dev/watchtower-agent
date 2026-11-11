@@ -2,6 +2,12 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-11-11
+
+### Fixed
+
+- With `php artisan route:cache` (usual in production) every browser beacon to `POST /_t/e` answered 500 (`Rate limiter [watchtower-browser] is not defined`): the routes came from the cache, so the provider skipped the code that also defined their rate limiter. The limiter is now defined on every boot.
+
 ## [0.4.1] - 2026-11-11
 
 ### Fixed

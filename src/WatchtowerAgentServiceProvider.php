@@ -329,11 +329,13 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
             $blade->directive('watchtowerBrowser', static fn (): string => '<?php echo \\'.BrowserTag::class.'::render(); ?>');
         });
 
+        // Defined on every boot: with `route:cache` the routes come from the cache, but their
+        // throttle middleware still looks this limiter up on each request.
+        RateLimiter::for('watchtower-browser', fn (Request $request) => Limit::perMinute(max(1, (int) config('watchtower-agent.browser.beacons_per_minute', 120)))->by('watchtower-browser:'.$request->ip()));
+
         if (! config('watchtower-agent.features.browser', true) || ($this->app instanceof CachesRoutes && $this->app->routesAreCached())) {
             return;
         }
-
-        RateLimiter::for('watchtower-browser', fn (Request $request) => Limit::perMinute(max(1, (int) config('watchtower-agent.browser.beacons_per_minute', 120)))->by('watchtower-browser:'.$request->ip()));
 
         $this->callAfterResolving('router', function ($router): void {
             if ($router->has('watchtower.browser.beacon')) {
