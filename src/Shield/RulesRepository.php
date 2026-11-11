@@ -128,6 +128,16 @@ class RulesRepository
     }
 
     /**
+     * Seconds since the cached copy was fetched, or null without a copy.
+     */
+    public function age(): ?int
+    {
+        $entry = $this->entry();
+
+        return $entry === null ? null : max(0, Carbon::now()->getTimestamp() - $entry['fetched_at']);
+    }
+
+    /**
      * @return array{rules: array<string, mixed>, fetched_at: int}|null
      */
     private function entry(): ?array

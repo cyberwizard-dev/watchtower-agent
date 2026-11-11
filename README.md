@@ -107,6 +107,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_SHIELD_CACHE_STORE` | default store | Store for the rules, rate limit counters and penalties. Use a shared store (Redis) with several servers. |
 | `WATCHTOWER_AGENT_SHIELD_PASS_MINUTES` | `30` | Lifetime of the `wt_shield_pass` cookie after a solved challenge. |
 | `WATCHTOWER_AGENT_SHIELD_HONEYPOT_FIELD` | `wt_hp_website` | Honeypot field name until Watch Tower sends one. |
+| `WATCHTOWER_AGENT_SHIELD_UNREACHABLE_GRACE` | `900` | Seconds `watchtower:shield-sync` tolerates Watch Tower being unreachable (with cached rules) before the task fails. |
 | `WATCHTOWER_AGENT_BROWSER` | `true` | Browser monitoring; active once a browser key is set. |
 | `WATCHTOWER_AGENT_BROWSER_KEY` | — | Public browser key from Watch Tower (Settings → Environments → Browser monitoring). |
 | `WATCHTOWER_AGENT_BROWSER_PROXY` | `true` | Serve the script and receive beacons on the app's own domain (see [Browser monitoring](#browser-monitoring)). |
@@ -350,7 +351,7 @@ Each record has the `guard` (when the event has one), the `user_id` (`getAuthIde
 
 Off by default (`WATCHTOWER_AGENT_SHIELD=true`). Shield is a global middleware that applies rules you manage in Watch Tower before the app sees the request. It runs right after `TrustProxies` (and Nightwatch's own middleware), so `$request->ip()` is the client and the request is still captured by Nightwatch.
 
-**Rules.** `watchtower:shield-sync` pulls `GET {NIGHTWATCH_BASE_URL}/api/shield/v1/rules` with `NIGHTWATCH_TOKEN` every minute (2 s timeout, `If-None-Match` so unchanged rules are a 304) into the app cache. The copy is used for its `ttl_seconds`; a stale or missing copy is refreshed **after** the response is sent, never during a request, and at most once per 15 seconds across processes. The last good copy is kept when Watch Tower is unreachable. With no copy at all every request is allowed: Shield fails open, and an error inside Shield also lets the request through.
+**Rules.** `watchtower:shield-sync` pulls `GET {NIGHTWATCH_BASE_URL}/api/shield/v1/rules` with `NIGHTWATCH_TOKEN` every minute (2 s timeout, `If-None-Match` so unchanged rules are a 304) into the app cache. The copy is used for its `ttl_seconds`; a stale or missing copy is refreshed **after** the response is sent, never during a request, and at most once per 15 seconds across processes. The last good copy is kept when Watch Tower is unreachable; the sync command only fails (and so shows up as a failed scheduled task) once that copy is older than `WATCHTOWER_AGENT_SHIELD_UNREACHABLE_GRACE` (15 minutes) or there is none, so a Watch Tower restart is not an error. With no copy at all every request is allowed: Shield fails open, and an error inside Shield also lets the request through.
 
 **Order.** Allow list (wins over everything) → blocked IPs (IPv4/IPv6 CIDR, expired entries ignored) → user agent expressions (PCRE without delimiters; invalid expressions are skipped, matching is capped at 1 KB and a low backtracking limit) → path globs (`*` matches across `/`, case-insensitive, on the decoded path with duplicate slashes collapsed) → rate limits → honeypot → challenge.
 

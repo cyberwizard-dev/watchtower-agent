@@ -2,6 +2,12 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-11
+
+### Fixed
+
+- `watchtower:shield-sync` no longer fails the scheduled task (which Laravel reports as an exception) when Watch Tower is briefly unreachable, for example while it restarts: with cached rules younger than `shield.unreachable_grace_seconds` (`WATCHTOWER_AGENT_SHIELD_UNREACHABLE_GRACE`, 900) it warns and succeeds. Older rules, or none at all, still fail it so a real outage is noticed.
+
 ## [0.4.0] - 2026-11-11
 
 ### Added
