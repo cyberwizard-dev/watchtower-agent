@@ -46,6 +46,7 @@ return [
         'trace_context' => (bool) env('WATCHTOWER_AGENT_TRACE_CONTEXT', true),
         'auth' => (bool) env('WATCHTOWER_AGENT_AUTH', true),
         'shield' => (bool) env('WATCHTOWER_AGENT_SHIELD', false),
+        'browser' => (bool) env('WATCHTOWER_AGENT_BROWSER', true),
     ],
 
     /*
@@ -267,6 +268,33 @@ return [
         'max_per_execution' => 10,
         'throttle_seconds' => (int) env('WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS', 10),
         'sample_decisions' => (bool) env('WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Browser monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Page views, Core Web Vitals and JavaScript errors from visitors' browsers.
+    | Active once a browser key (Watch Tower: Settings → Environments → Browser
+    | monitoring) is set; put @watchtowerBrowser in your layout's <head>. With
+    | the proxy on, the script is served from {path}/s.js and beacons go to
+    | {path}/e on the app's own domain, then on to Watch Tower with the
+    | environment token, so content blockers do not drop them.
+    |
+    */
+
+    'browser' => [
+        'key' => env('WATCHTOWER_AGENT_BROWSER_KEY'),
+        'proxy' => (bool) env('WATCHTOWER_AGENT_BROWSER_PROXY', true),
+        'path' => env('WATCHTOWER_AGENT_BROWSER_PATH', '/_t'),
+        'release' => env('WATCHTOWER_AGENT_BROWSER_RELEASE', env('NIGHTWATCH_DEPLOY')),
+        'sample' => env('WATCHTOWER_AGENT_BROWSER_SAMPLE'),
+        'base_url' => env('NIGHTWATCH_BASE_URL'),
+        'token' => env('NIGHTWATCH_TOKEN'),
+        'timeout' => (int) env('WATCHTOWER_AGENT_BROWSER_TIMEOUT', 3),
+        'script_cache_minutes' => 60,
+        'beacons_per_minute' => (int) env('WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE', 120),
     ],
 
     /*

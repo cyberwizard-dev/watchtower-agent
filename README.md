@@ -26,6 +26,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Webhooks](#webhooks)
 - [Authentication events](#authentication-events)
 - [Shield (bot and spam protection)](#shield-bot-and-spam-protection)
+- [Browser monitoring](#browser-monitoring)
 - [Commands](#commands)
 - [How records are sent](#how-records-are-sent)
 - [Testing](#testing)
@@ -106,6 +107,13 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_SHIELD_CACHE_STORE` | default store | Store for the rules, rate limit counters and penalties. Use a shared store (Redis) with several servers. |
 | `WATCHTOWER_AGENT_SHIELD_PASS_MINUTES` | `30` | Lifetime of the `wt_shield_pass` cookie after a solved challenge. |
 | `WATCHTOWER_AGENT_SHIELD_HONEYPOT_FIELD` | `wt_hp_website` | Honeypot field name until Watch Tower sends one. |
+| `WATCHTOWER_AGENT_BROWSER` | `true` | Browser monitoring; active once a browser key is set. |
+| `WATCHTOWER_AGENT_BROWSER_KEY` | — | Public browser key from Watch Tower (Settings → Environments → Browser monitoring). |
+| `WATCHTOWER_AGENT_BROWSER_PROXY` | `true` | Serve the script and receive beacons on the app's own domain (see [Browser monitoring](#browser-monitoring)). |
+| `WATCHTOWER_AGENT_BROWSER_PATH` | `/_t` | Path prefix of the proxy routes. |
+| `WATCHTOWER_AGENT_BROWSER_RELEASE` | `NIGHTWATCH_DEPLOY` | `data-release` of the script, to compare releases. |
+| `WATCHTOWER_AGENT_BROWSER_SAMPLE` | — | Share of page loads to report, e.g. `0.25`. |
+| `WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE` | `120` | Beacons accepted per visitor IP per minute by the proxy. |
 | `TURNSTILE_SECRET` | none | Cloudflare Turnstile secret. Without it challenges become 429s. Never sent by Watch Tower. |
 | `WATCHTOWER_AGENT_REDACT_KEY_PATTERN` | Watch Tower's pattern | Keys whose values are masked in payloads, headers and query strings. |
 | `WATCHTOWER_AGENT_SCHEDULE_COMMANDS` | `true` | Add the agent's commands to the schedule. |
@@ -365,6 +373,34 @@ Nightwatch drops the buffered records of every execution its sample rate skips (
 So a client hammering the app doesn't cost one write per request, repeats are throttled: at most one `wt-shield` record per (action, rule, IP) and one `failed`/`lockout` record per (event, IP, identifier) every 10 seconds (`WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS`, `WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS`, `0` sends every one). The window is kept in the cache (the Shield cache store for decisions, the default store for auth), so it is shared by all PHP-FPM processes, and in memory for long-running ones. Records carry no count, so during an attack Watch Tower sees one decision per window and its rule hit counters count windows, not requests.
 
 When a decision is sent, Shield also calls Nightwatch's `sample()` so the request it was made for is kept (its request record, and anything else Nightwatch buffered); throttled decisions don't, so this adds at most one sampled request per window. Turn it off with `WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS=false`.
+
+## Browser monitoring
+
+Page views, Core Web Vitals (LCP, INP, CLS, FCP, TTFB) and JavaScript errors from your visitors'
+browsers, shown on Watch Tower's **Frontend** page. Turn it on for the environment in Watch Tower
+(**Settings → Environments → Browser monitoring**), list your site under allowed sites, then:
+
+```env
+WATCHTOWER_AGENT_BROWSER_KEY=<browser key from Watch Tower>
+```
+
+```blade
+{{-- in your layout's <head> --}}
+@watchtowerBrowser
+```
+
+That is all: nothing renders until a browser key and `NIGHTWATCH_BASE_URL` are set.
+
+**Why a proxy.** Many content blockers and privacy browsers drop requests to third-party monitoring
+hosts (`net::ERR_BLOCKED_BY_CLIENT`). So by default the script is served from your own domain at
+`/_t/s.js` and beacons go to `/_t/e`; the agent forwards them to Watch Tower with `NIGHTWATCH_TOKEN` and
+the visitor's origin, user agent and IP (`X-Watchtower-*` headers, which Watch Tower only trusts with
+that environment's token). The token never reaches the browser. Both routes sit outside the `web`
+middleware group (no session, no CSRF), are rate limited per visitor IP, cache the script for an hour
+and never show visitors an error, even when Watch Tower is down. The agent's own calls produce no
+`wt-http` and no `traceparent`. With `WATCHTOWER_AGENT_BROWSER_PROXY=false` the tag loads the script
+from Watch Tower directly. Behind a load balancer, make sure Laravel's `TrustProxies` is configured so
+`$request->ip()` is the visitor.
 
 ## Commands
 

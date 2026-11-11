@@ -65,6 +65,7 @@ it('merges the default config', function () {
         'trace_context' => true,
         'auth' => true,
         'shield' => false,
+        'browser' => true,
     ])->and(config('watchtower-agent.max_output_bytes'))->toBe(65536)
         ->and(config('watchtower-agent.capture_all_task_output'))->toBeFalse()
         ->and(config('watchtower-agent.queues'))->toBeNull();
