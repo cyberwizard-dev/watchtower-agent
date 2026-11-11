@@ -12,7 +12,7 @@ use Cyberwizard\WatchtowerAgent\Webhooks\WebhookState;
 
 class WatchtowerAgent
 {
-    public const VERSION = '0.3.1';
+    public const VERSION = '0.4.0';
 
     /**
      * Every feature the package knows about, in the order the hello record lists them.
@@ -93,6 +93,9 @@ class WatchtowerAgent
             'bindings' => false,
             'actions' => (bool) config('watchtower-agent.features.actions', false)
                 && filled(config('watchtower-agent.actions.secret')),
+            'browser' => (bool) config('watchtower-agent.features.browser', true)
+                && filled(config('watchtower-agent.browser.key'))
+                && filled(config('watchtower-agent.browser.base_url')),
             default => (bool) config("watchtower-agent.features.{$feature}", false),
         };
     }

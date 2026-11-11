@@ -10,6 +10,8 @@ use Cyberwizard\ScheduleCatchup\Events\ScheduleOccurrenceReplayed;
 use Cyberwizard\ScheduleCatchup\Events\ScheduleOutageRecorded;
 use Cyberwizard\WatchtowerAgent\Auth\AuthRecorder;
 use Cyberwizard\WatchtowerAgent\Broadcasting\BroadcastRecorder;
+use Cyberwizard\WatchtowerAgent\Browser\BrowserProxyController;
+use Cyberwizard\WatchtowerAgent\Browser\BrowserTag;
 use Cyberwizard\WatchtowerAgent\Cache\CacheOpRecorder;
 use Cyberwizard\WatchtowerAgent\Catchup\CatchupReporter;
 use Cyberwizard\WatchtowerAgent\Console\ActionsCommand;
@@ -43,6 +45,7 @@ use Cyberwizard\WatchtowerAgent\Webhooks\RecordIncomingWebhook;
 use Cyberwizard\WatchtowerAgent\Webhooks\SpatieWebhookRecorder;
 use Cyberwizard\WatchtowerAgent\Workers\WorkerHeartbeat;
 use Illuminate\Broadcasting\BroadcastManager;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Events\ScheduledBackgroundTaskFinished;
@@ -56,6 +59,7 @@ use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Http\Request;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Events\MessageSent;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -67,7 +71,9 @@ use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Queue\Events\WorkerStarting;
 use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class WatchtowerAgentServiceProvider extends ServiceProvider
@@ -132,6 +138,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower-agent');
         $this->registerShield();
+        $this->registerBrowser();
 
         $this->registerListeners($this->app->make(Dispatcher::class));
         $this->registerObservability($this->app->make(Dispatcher::class));
@@ -309,6 +316,33 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         $this->callAfterResolving('blade.compiler', function ($blade): void {
             $blade->directive('watchtowerHoneypot', static fn (): string => '<?php echo \\'.Honeypot::class.'::render(); ?>');
+        });
+    }
+
+    /**
+     * Browser monitoring: @watchtowerBrowser and the first-party proxy routes (outside the web
+     * middleware group: no session, no CSRF, rate limited per visitor IP).
+     */
+    private function registerBrowser(): void
+    {
+        $this->callAfterResolving('blade.compiler', function ($blade): void {
+            $blade->directive('watchtowerBrowser', static fn (): string => '<?php echo \\'.BrowserTag::class.'::render(); ?>');
+        });
+
+        if (! config('watchtower-agent.features.browser', true) || ($this->app instanceof CachesRoutes && $this->app->routesAreCached())) {
+            return;
+        }
+
+        RateLimiter::for('watchtower-browser', fn (Request $request) => Limit::perMinute(max(1, (int) config('watchtower-agent.browser.beacons_per_minute', 120)))->by('watchtower-browser:'.$request->ip()));
+
+        $this->callAfterResolving('router', function ($router): void {
+            if ($router->has('watchtower.browser.beacon')) {
+                return;
+            }
+
+            $path = BrowserTag::path();
+            $router->get($path.'/s.js', [BrowserProxyController::class, 'script'])->name('watchtower.browser.script');
+            $router->post($path.'/e', [BrowserProxyController::class, 'beacon'])->middleware(ThrottleRequests::using('watchtower-browser'))->name('watchtower.browser.beacon');
         });
     }
 

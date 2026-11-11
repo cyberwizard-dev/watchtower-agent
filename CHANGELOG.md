@@ -2,6 +2,13 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-11
+
+### Added
+
+- Browser monitoring (`browser`, on by default, active once `WATCHTOWER_AGENT_BROWSER_KEY` is set): the `@watchtowerBrowser` Blade directive (and `BrowserTag::render()`) writes Watch Tower's browser script tag with the public browser key, release and sample rate.
+- A first-party proxy so content blockers do not drop beacons: `GET {path}/s.js` serves Watch Tower's script (cached for an hour) and `POST {path}/e` forwards beacons to `/api/browser/v1/{key}` with `NIGHTWATCH_TOKEN` and the visitor's origin, user agent and IP in `X-Watchtower-*` headers. Outside the `web` group, rate limited per IP (`WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE`, 120), 404 until configured, never an error for visitors. `WATCHTOWER_AGENT_BROWSER_PROXY=false` loads the script from Watch Tower; `WATCHTOWER_AGENT_BROWSER_PATH` moves the routes (default `/_t`).
+
 ## [0.3.1] - 2026-11-10
 
 ### Fixed
