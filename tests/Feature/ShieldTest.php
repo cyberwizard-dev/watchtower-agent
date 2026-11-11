@@ -680,6 +680,19 @@ describe('rules sync', function () {
         expect(app(RulesRepository::class)->stale())->toBeTrue();
     });
 
+    it('does not fail the sync for a short outage while the copy is recent', function () {
+        Carbon::setTestNow('2026-11-10 12:00:00');
+        cacheShieldRules(['block' => ['paths' => ['/.env']]], Carbon::now()->getTimestamp() - 120);
+
+        Http::fake([SHIELD_RULES_URL => Http::failedConnection('Connection refused')]);
+
+        $this->artisan('watchtower:shield-sync')->expectsOutputToContain('fetched 120 s ago')->assertSuccessful();
+        $this->get('/.env')->assertForbidden();
+
+        config(['watchtower-agent.shield.unreachable_grace_seconds' => 60]);
+        $this->artisan('watchtower:shield-sync')->assertFailed();
+    });
+
     it('sends If-None-Match and keeps the copy on 304', function () {
         Carbon::setTestNow('2026-11-10 12:00:00');
         cacheShieldRules(['version' => 'abc123', 'block' => ['paths' => ['/.env']]], Carbon::now()->getTimestamp() - 120);

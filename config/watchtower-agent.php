@@ -268,6 +268,7 @@ return [
         'max_per_execution' => 10,
         'throttle_seconds' => (int) env('WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS', 10),
         'sample_decisions' => (bool) env('WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS', true),
+        'unreachable_grace_seconds' => (int) env('WATCHTOWER_AGENT_SHIELD_UNREACHABLE_GRACE', 900),
     ],
 
     /*
