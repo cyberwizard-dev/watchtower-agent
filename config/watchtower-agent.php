@@ -45,6 +45,7 @@ return [
         'webhooks' => (bool) env('WATCHTOWER_AGENT_WEBHOOKS', true),
         'trace_context' => (bool) env('WATCHTOWER_AGENT_TRACE_CONTEXT', true),
         'auth' => (bool) env('WATCHTOWER_AGENT_AUTH', true),
+        'notifications' => (bool) env('WATCHTOWER_AGENT_NOTIFICATIONS', true),
         'shield' => (bool) env('WATCHTOWER_AGENT_SHIELD', false),
         'browser' => (bool) env('WATCHTOWER_AGENT_BROWSER', true),
     ],
@@ -216,6 +217,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Notifications (wt-notification)
+    |--------------------------------------------------------------------------
+    |
+    | One record per recipient and channel a notification was sent to
+    | (NotificationSent) or failed for (NotificationFailed), with the
+    | recipient's type and key and a label: label_attribute read from the
+    | model's loaded attributes (no accessor or query runs; keys matching the
+    | redaction pattern are ignored), else "User #42". The recipient's route on
+    | the channel (e-mail address, phone number, Slack webhook…) is sent as the
+    | app resolves it; recipient_routes=false leaves it out. Failures carry
+    | the exception (secrets redacted, 1,000 characters at most) and are sent
+    | immediately so sampling never drops them.
+    |
+    */
+
+    'notifications' => [
+        'recipient_routes' => (bool) env('WATCHTOWER_AGENT_NOTIFICATION_RECIPIENT_ROUTES', true),
+        'label_attribute' => env('WATCHTOWER_AGENT_NOTIFICATION_LABEL', 'name'),
+        'max_per_execution' => 100,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication events (wt-auth)
     |--------------------------------------------------------------------------
     |
@@ -296,6 +320,8 @@ return [
         'timeout' => (int) env('WATCHTOWER_AGENT_BROWSER_TIMEOUT', 3),
         'script_cache_minutes' => 60,
         'beacons_per_minute' => (int) env('WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE', 120),
+        // Session replay chunks forwarded per visitor IP (replay is turned on in Watch Tower).
+        'replay_chunks_per_minute' => (int) env('WATCHTOWER_AGENT_BROWSER_REPLAY_CHUNKS_PER_MINUTE', 30),
     ],
 
     /*

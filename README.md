@@ -22,6 +22,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Broadcasting](#broadcasting)
 - [Cache operations](#cache-operations)
 - [Mail](#mail)
+- [Notifications](#notifications)
 - [Outgoing HTTP and trace context](#outgoing-http-and-trace-context)
 - [Webhooks](#webhooks)
 - [Authentication events](#authentication-events)
@@ -76,6 +77,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_WEBHOOKS` | `true` | Incoming webhooks and outgoing webhook tagging. |
 | `WATCHTOWER_AGENT_TRACE_CONTEXT` | `true` | W3C `traceparent` out and in. |
 | `WATCHTOWER_AGENT_AUTH` | `true` | Authentication events (security signals). |
+| `WATCHTOWER_AGENT_NOTIFICATIONS` | `true` | Notification recipients and failures. |
 | `WATCHTOWER_AGENT_EVENTS_LISTENER_TIMING` | `true` | Instrument the dispatcher to time listeners; `false` records dispatches only. |
 | `WATCHTOWER_AGENT_EVENTS_ALLOW` / `_DENY` | none | Comma-separated event name patterns. Allow wins over every deny. |
 | `WATCHTOWER_AGENT_EVENTS_SAMPLE_RATE` | `1.0` | Fraction of captured events recorded. |
@@ -88,6 +90,8 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_MAIL_BCC` | `false` | Include Bcc recipients. |
 | `WATCHTOWER_AGENT_MAIL_PREVIEW` | `false` | First 500 characters of the text part, redacted. |
 | `WATCHTOWER_AGENT_MAIL_CAPTURE_FAILURES` | `true` | Wrap each mailer's transport to see send exceptions. |
+| `WATCHTOWER_AGENT_NOTIFICATION_RECIPIENT_ROUTES` | `true` | Send each recipient's route on the channel (e-mail address, phone number, …) as the app resolves it; `false` leaves routes out. |
+| `WATCHTOWER_AGENT_NOTIFICATION_LABEL` | `name` | Model attribute used as the recipient's label (falls back to `User #42`). |
 | `WATCHTOWER_AGENT_HTTP_HEADERS` | `true` | Sanitised request and response headers. |
 | `WATCHTOWER_AGENT_HTTP_BODIES` | `false` | Redacted request and response bodies. |
 | `WATCHTOWER_AGENT_HTTP_MAX_BODY_BYTES` | `8192` | Body cap. |
@@ -155,10 +159,11 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `webhooks` | `wt-webhook-in`, `wt-http.webhook` | Each request through `watchtower.webhook:{source}`; outgoing webhooks tagged. |
 | `trace_context` | `wt-trace-link` | A request that arrives with a `traceparent`. |
 | `auth` | `wt-auth` | Login, failed login, lockout, logout, password reset, registration, e-mail verification, other-device logout. |
+| `notifications` | `wt-notification` | Each notification sent (`NotificationSent`) or failed (`NotificationFailed`), once per recipient and channel, with the recipient. |
 | `shield` (off by default) | `wt-shield` | Every Shield decision that is not "allow". |
 | — | `wt-hello` | Hourly and on demand: package, Laravel and PHP versions and the enabled features. |
 
-Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, HTTP, webhooks, trace links, auth events) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records (except Shield decisions and failed logins/lockouts, which are sent immediately). Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
+Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version`. Records about what happened inside a request, job, command or scheduled task (events, broadcasts, cache operations, mail, notifications, HTTP, webhooks, trace links, auth events) also carry Nightwatch's `trace_id`, `execution_source`, `execution_id`, `execution_stage` and `user`; they are buffered with the execution, so they follow Nightwatch's sampling and arrive with its own records (except Shield decisions, failed logins/lockouts and failed notifications, which are sent immediately). Each type is capped per execution (events 50, others 100–200) so Nightwatch's 500-record buffer is never flooded. Task records carry the same group hash Nightwatch computes for the task, so Watch Tower attaches them to the task Nightwatch already knows.
 
 ## What Nightwatch can't do, and what this adds
 
@@ -170,6 +175,7 @@ Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version
 | Task and command output isn't recorded. | The tail of the output is attached to the run. |
 | A slot missed during downtime looks missed forever. | Replays by schedule-catchup mark the slot recovered; outages and give-ups are visible. |
 | Health is probed from outside. | Database, Redis, cache, disk and queues are checked from inside the app. |
+| A notification record has no recipient (only the signed-in user, so jobs and commands show none) and is never marked failed. | Each recipient and channel is recorded with its label and route, and failures with their reason. |
 | Retrying a failed job means SSH and `queue:retry`. | One click in Watch Tower, verified and run by the agent. |
 
 ## Health checks
@@ -290,6 +296,23 @@ Nightwatch already records hits, misses, writes and deletes. `wt-cache-op` adds 
 
 Each message gets an `X-Watchtower-Mail-Id` header. `wt-mail` records `queued` (a `SendQueuedMailable` or mail notification pushed), `sending` (`MessageSending`), `sent` (`MessageSent`, with the transport's Message-ID, which provider delivery webhooks match on) and `failed` (the transport threw; the agent wraps each mailer's Symfony transport for this because Laravel dispatches no failure event). Stages of a queued mail share its mail id. Recipients are masked by default, Bcc is left out unless enabled, and the preview is off. **"Sent" means accepted by the transport, not delivered**; only provider events received by Watch Tower mark a mail delivered or bounced. Nightwatch's own `mail` record is untouched; `wt-mail` only fills gaps.
 
+## Notifications
+
+Nightwatch's `notification` record names the class and channel and carries the execution's signed-in user, which is nobody for notifications sent from queued jobs, commands and scheduled tasks; it never says who received the notification and always reports `failed: false`. `wt-notification` adds one record per recipient and channel, from `NotificationSent` (`status: sent`) and `NotificationFailed` (`status: failed`; Laravel dispatches it when a channel throws). `Notification::send($users, …)` to three users over `mail` and `database` gives six records.
+
+| Field | Value |
+|---|---|
+| `notification_id` | The notification's id (Laravel assigns a UUID per send). |
+| `notification`, `channel` | Class (anonymous classes cut like Nightwatch does) and channel name. |
+| `notifiable_type`, `notifiable_class` | `User`, `App\Models\User`; `AnonymousNotifiable` for `Notification::route()`. |
+| `notifiable_key` | `getKey()` of a model; the route of an on-demand notification. |
+| `label` | `notifications.label_attribute` (default `name`) from the model's loaded attributes (no accessor, relation or query runs; keys matching the redaction pattern are ignored), else `User #42`; the route of an on-demand notification, else `On-demand`. |
+| `route` | `routeNotificationFor($channel)` (e-mail address, phone number, Slack webhook, …) as the app resolves it. Not resolved for `database` and `broadcast`. |
+| `duration` | Microseconds from `NotificationSending`. |
+| `error` | For failures: exception class and message, secrets redacted (redaction key pattern), at most 1,000 characters. |
+
+**Routes are sent unmasked by default**, so Watch Tower can show who a notification went to. Set `WATCHTOWER_AGENT_NOTIFICATION_RECIPIENT_ROUTES=false` to leave `route` out (on-demand recipients then have no key and the label `On-demand`). Sent records are buffered with the execution and follow Nightwatch's sampling; failures are sent immediately so sampling never drops them. Both are capped at 100 per execution. Watch Tower links each record to Nightwatch's notification row of the same execution, class and channel.
+
 ## Outgoing HTTP and trace context
 
 A Guzzle middleware is added to Laravel's Http client (`Http::globalMiddleware()`), after Nightwatch's. For every attempt it records `wt-http`: method, URL with sensitive query values masked and credentials removed, host, normalised path (`/v1/charges/{id}`), a group hash of `xxh128(METHOD . host . normalised path)`, status or outcome (`response`, `connection-failed`, `timeout`), duration, configured timeouts, sanitised headers (`authorization`, `proxy-authorization`, `cookie`, `set-cookie`, `x-api-key`, any `*signature*` header and anything matching the redaction pattern become `[redacted]`) and, only when enabled, redacted bodies capped at 8 KB. The middleware is used instead of the `RequestSending` / `ResponseReceived` / `ConnectionFailed` events because it sees each attempt with its options and timing, can add headers, and covers plain Guzzle clients too; using both would record every request twice. Nightwatch's `outgoing-request` record is unchanged.
@@ -402,6 +425,12 @@ and never show visitors an error, even when Watch Tower is down. The agent's own
 `wt-http` and no `traceparent`. With `WATCHTOWER_AGENT_BROWSER_PROXY=false` the tag loads the script
 from Watch Tower directly. Behind a load balancer, make sure Laravel's `TrustProxies` is configured so
 `$request->ip()` is the visitor.
+
+**Session replay.** Turned on per environment in Watch Tower (**Settings → Environments → Session
+replay**); nothing to change here. With the proxy, the script loads the recorder from `/_t/r.js`, asks
+`/_t/c` whether to record (cached for a minute) and sends gzipped chunks to `POST /_t/r` (up to 1 MB,
+`WATCHTOWER_AGENT_BROWSER_REPLAY_CHUNKS_PER_MINUTE`, 30 per visitor IP). A refusal from Watch Tower
+(replay off, session limit reached) is passed on so the recorder stops; anything else is a quiet 204.
 
 ## Commands
 

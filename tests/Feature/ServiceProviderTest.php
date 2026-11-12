@@ -38,6 +38,11 @@ it('schedules the agent commands without overlapping', function () {
     foreach ($events as $event) {
         expect($event->withoutOverlapping)->toBeTrue();
     }
+
+    expect($events['watchtower:hello']->expiresAt)->toBe(30)
+        ->and($events['watchtower:schedule-sync']->expiresAt)->toBe(15)
+        ->and($events['watchtower:queue-snapshot']->expiresAt)->toBe(5)
+        ->and($events['watchtower:health-report']->expiresAt)->toBe(5);
 });
 
 it('schedules nothing when the agent is disabled', function () {
@@ -64,9 +69,11 @@ it('merges the default config', function () {
         'webhooks' => true,
         'trace_context' => true,
         'auth' => true,
+        'notifications' => true,
         'shield' => false,
         'browser' => true,
     ])->and(config('watchtower-agent.max_output_bytes'))->toBe(65536)
         ->and(config('watchtower-agent.capture_all_task_output'))->toBeFalse()
-        ->and(config('watchtower-agent.queues'))->toBeNull();
+        ->and(config('watchtower-agent.queues'))->toBeNull()
+        ->and(config('watchtower-agent.notifications'))->toBe(['recipient_routes' => true, 'label_attribute' => 'name', 'max_per_execution' => 100]);
 });

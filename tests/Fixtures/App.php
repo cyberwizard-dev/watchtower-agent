@@ -8,10 +8,23 @@
 namespace App\Models {
 
     use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Notifications\Notifiable;
 
     class Order extends Model
     {
         protected $guarded = [];
+    }
+
+    class Customer extends Model
+    {
+        use Notifiable;
+
+        protected $guarded = [];
+
+        public function routeNotificationForVonage(): string
+        {
+            return '+15550100';
+        }
     }
 }
 
@@ -228,4 +241,28 @@ namespace App\Notifications {
     }
 
     class QueuedOrderShippedNotification extends OrderShippedNotification implements ShouldQueue {}
+
+    class SmsAndDatabaseNotification extends Notification
+    {
+        public function via(object $notifiable): array
+        {
+            return ['database', 'vonage'];
+        }
+    }
+
+    class FailingChannelNotification extends Notification
+    {
+        public function via(object $notifiable): array
+        {
+            return [FailingChannel::class];
+        }
+    }
+
+    class FailingChannel
+    {
+        public function send(object $notifiable, Notification $notification): void
+        {
+            throw new \RuntimeException('SMTP said no to jane@example.com with api_key=sk_live_123');
+        }
+    }
 }
