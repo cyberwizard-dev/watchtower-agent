@@ -28,6 +28,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Authentication events](#authentication-events)
 - [Shield (bot and spam protection)](#shield-bot-and-spam-protection)
 - [Browser monitoring](#browser-monitoring)
+- [Server metrics](#server-metrics)
 - [Commands](#commands)
 - [How records are sent](#how-records-are-sent)
 - [Testing](#testing)
@@ -78,6 +79,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_TRACE_CONTEXT` | `true` | W3C `traceparent` out and in. |
 | `WATCHTOWER_AGENT_AUTH` | `true` | Authentication events (security signals). |
 | `WATCHTOWER_AGENT_NOTIFICATIONS` | `true` | Notification recipients and failures. |
+| `WATCHTOWER_AGENT_HOST` | `true` | Server metrics: CPU, memory, disks and top processes. |
 | `WATCHTOWER_AGENT_EVENTS_LISTENER_TIMING` | `true` | Instrument the dispatcher to time listeners; `false` records dispatches only. |
 | `WATCHTOWER_AGENT_EVENTS_ALLOW` / `_DENY` | none | Comma-separated event name patterns. Allow wins over every deny. |
 | `WATCHTOWER_AGENT_EVENTS_SAMPLE_RATE` | `1.0` | Fraction of captured events recorded. |
@@ -121,6 +123,11 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE` | `120` | Beacons accepted per visitor IP per minute by the proxy. |
 | `TURNSTILE_SECRET` | none | Cloudflare Turnstile secret. Without it challenges become 429s. Never sent by Watch Tower. |
 | `WATCHTOWER_AGENT_REDACT_KEY_PATTERN` | Watch Tower's pattern | Keys whose values are masked in payloads, headers and query strings. |
+| `WATCHTOWER_AGENT_HOST_PROC` | `/proc` | `/proc` to read on Linux. Point it at a read-only mount of the host's `/proc` to report the whole server (see [Server metrics](#server-metrics)). |
+| `WATCHTOWER_AGENT_HOST_PASSWD` | `/etc/passwd` | File used to turn process uids into user names. |
+| `WATCHTOWER_AGENT_HOST_CGROUP` | `/sys/fs/cgroup` | cgroup v2 (`memory.max`) or v1 (`memory/memory.limit_in_bytes`) root for the container memory limit. |
+| `WATCHTOWER_AGENT_HOST_DISKS` | `/`, `storage_path()` | Comma-separated paths whose file system is measured; paths on the same file system are reported once (at most 10). |
+| `WATCHTOWER_AGENT_HOST_SAMPLE_MS` | `500` | Milliseconds between the two CPU samples. |
 | `WATCHTOWER_AGENT_SCHEDULE_COMMANDS` | `true` | Add the agent's commands to the schedule. |
 | `WATCHTOWER_AGENT_QUEUE_LIST` | default connection's default queue | Comma-separated `connection:queue` pairs to measure. |
 | `WATCHTOWER_AGENT_WORKER_HEARTBEAT` | `30` | Seconds between `alive` heartbeats. |
@@ -160,6 +167,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `trace_context` | `wt-trace-link` | A request that arrives with a `traceparent`. |
 | `auth` | `wt-auth` | Login, failed login, lockout, logout, password reset, registration, e-mail verification, other-device logout. |
 | `notifications` | `wt-notification` | Each notification sent (`NotificationSent`) or failed (`NotificationFailed`), once per recipient and channel, with the recipient. |
+| `host` | `wt-host` | Every minute. CPU cores, load and usage, memory and swap, container memory limit, disk usage and the top 15 processes. See [Server metrics](#server-metrics). |
 | `shield` (off by default) | `wt-shield` | Every Shield decision that is not "allow". |
 | — | `wt-hello` | Hourly and on demand: package, Laravel and PHP versions and the enabled features. |
 
@@ -432,6 +440,41 @@ replay**); nothing to change here. With the proxy, the script loads the recorder
 `WATCHTOWER_AGENT_BROWSER_REPLAY_CHUNKS_PER_MINUTE`, 30 per visitor IP). A refusal from Watch Tower
 (replay off, session limit reached) is passed on so the recorder stops; anything else is a quiet 204.
 
+## Server metrics
+
+`watchtower:host-snapshot` sends a `wt-host` record every minute (`WATCHTOWER_AGENT_HOST`, on by default):
+
+- **CPU**: cores, 1/5/15-minute load and usage over two `/proc/stat` samples 500 ms apart.
+- **Memory**: total, used, available, swap total and used, and the container's memory limit and usage from cgroup v2 (`memory.max`, `memory.current`) or v1 (`memory.limit_in_bytes`, `memory.usage_in_bytes`) when the container is actually limited.
+- **Disks**: total, used and free bytes for `/` and `storage_path()` (or `WATCHTOWER_AGENT_HOST_DISKS`), each file system once.
+- **Processes**: the process count and up to 15 processes (the top 10 by CPU and the top 10 by memory, sorted by CPU) with pid, user, name, command line, CPU %, resident memory and start time.
+- Uptime, hostname, OS and `scope`.
+
+On Linux everything comes from `/proc` and the cgroup files; nothing is executed. Elsewhere (macOS during development) the agent falls back to `sysctl`, `vm_stat` and `ps` with one-second timeouts. A value that can't be read is `null`, a failed read never fails the command, scanning stops after 2,000 processes or one second, and a snapshot takes about 0.6 s.
+
+### Container or whole server
+
+Inside a container `/proc` shows the container's own processes (`"scope": "container"`), while load, memory and CPU usage already describe the whole machine. To see every process on the server, mount the host's `/proc` read-only and point the agent at it; the record then says `"scope": "host"` and the hostname is the server's:
+
+```yaml
+services:
+  app:
+    image: registry.example.com/app:latest
+    environment:
+      WATCHTOWER_AGENT_HOST_PROC: /host/proc
+      WATCHTOWER_AGENT_HOST_PASSWD: /host/etc/passwd
+    volumes:
+      - /proc:/host/proc:ro
+      - /etc/passwd:/host/etc/passwd:ro
+    deploy:
+      mode: replicated
+      replicas: 1
+```
+
+Mount it only on the service that runs the scheduler, so each server reports once. Without the `passwd` mount, uids are matched against the container's own `/etc/passwd` and users the container doesn't know are `null`.
+
+This is off by default because it widens what the app can see: with the host's `/proc` mounted, the command line of every process on the server (other apps, databases, deploy tooling) is readable by the app and sent to Watch Tower. Commands are capped at 300 characters and secret-looking arguments are replaced with `[redacted]` before they leave the app: `--password=…`, `--token=…`, `--secret …` and other `key`, `secret`, `token` and `password` options, `-p<value>` for `mysql`/`mariadb` tools, `*KEY=…`, `*SECRET=…`, `*TOKEN=…` and `*PASSWORD=…` assignments, and the password in URLs like `redis://user:pass@host`. Redaction is pattern-based, so a secret passed in another shape can still get through; prefer environment variables or files for credentials.
+
 ## Commands
 
 | Command | Schedule |
@@ -442,6 +485,7 @@ replay**); nothing to change here. With the proxy, the script loads the recorder
 | `watchtower:health-report` | every minute (`-v` prints the results) |
 | `watchtower:actions` | every minute, only when actions are enabled |
 | `watchtower:shield-sync` | every minute, only when Shield is enabled |
+| `watchtower:host-snapshot` | every minute |
 
 Set `WATCHTOWER_AGENT_SCHEDULE_COMMANDS=false` to schedule them yourself.
 
