@@ -20,7 +20,7 @@ it('sends wt-hello and the schedule', function () {
     expect($hello[0]['features'])->toBe([
         'schedule', 'queues', 'workers', 'output', 'catchup', 'health',
         'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context', 'auth',
-        'notifications',
+        'notifications', 'host',
     ])
         ->and($hello[0]['laravel_version'])->toBe(app()->version())
         ->and($hello[0]['schedule_catchup_version'])->toBeString()

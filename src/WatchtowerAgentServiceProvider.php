@@ -17,6 +17,7 @@ use Cyberwizard\WatchtowerAgent\Catchup\CatchupReporter;
 use Cyberwizard\WatchtowerAgent\Console\ActionsCommand;
 use Cyberwizard\WatchtowerAgent\Console\HealthReportCommand;
 use Cyberwizard\WatchtowerAgent\Console\HelloCommand;
+use Cyberwizard\WatchtowerAgent\Console\HostSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\QueueSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\ScheduleSyncCommand;
 use Cyberwizard\WatchtowerAgent\Console\ShieldSyncCommand;
@@ -135,6 +136,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
                 HealthReportCommand::class,
                 ActionsCommand::class,
                 ShieldSyncCommand::class,
+                HostSnapshotCommand::class,
             ]);
         }
 
@@ -430,6 +432,10 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         if (WatchtowerAgent::feature('shield')) {
             $schedule->command(ShieldSyncCommand::class)->everyMinute()->withoutOverlapping(5);
+        }
+
+        if (WatchtowerAgent::feature('host')) {
+            $schedule->command(HostSnapshotCommand::class)->everyMinute()->withoutOverlapping(5);
         }
     }
 }

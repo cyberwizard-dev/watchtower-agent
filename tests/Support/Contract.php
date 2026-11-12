@@ -239,6 +239,57 @@ class Contract
             'user_id' => '?string',
             'rules_version' => 'string',
         ],
+        'wt-host' => [
+            'scope' => 'string',
+            'os' => 'string',
+            'hostname' => 'string',
+            'uptime_seconds' => '?int',
+            'cpu' => 'object',
+            'memory' => 'object',
+            'disks' => 'list',
+            'processes' => 'object',
+        ],
+    ];
+
+    public const HOST_CPU = [
+        'cores' => '?int',
+        'load_1' => '?float',
+        'load_5' => '?float',
+        'load_15' => '?float',
+        'usage_percent' => '?float',
+    ];
+
+    public const HOST_MEMORY = [
+        'total_bytes' => '?int',
+        'used_bytes' => '?int',
+        'available_bytes' => '?int',
+        'swap_total_bytes' => '?int',
+        'swap_used_bytes' => '?int',
+        'container_limit_bytes' => '?int',
+        'container_used_bytes' => '?int',
+    ];
+
+    public const HOST_DISK = [
+        'mount' => 'string',
+        'total_bytes' => 'int',
+        'used_bytes' => 'int',
+        'free_bytes' => 'int',
+    ];
+
+    public const HOST_PROCESSES = [
+        'total' => '?int',
+        'top' => 'list',
+    ];
+
+    public const HOST_PROCESS = [
+        'pid' => 'int',
+        'user' => '?string',
+        'name' => 'string',
+        'command' => 'string',
+        'cpu_percent' => '?float',
+        'memory_bytes' => '?int',
+        'memory_percent' => '?float',
+        'started_at' => '?float',
     ];
 
     public const EVENT_LISTENER = [
@@ -315,6 +366,7 @@ class Contract
         'wt-broadcast.channels.type' => ['public', 'private', 'presence'],
         'wt-shield.action' => ['blocked', 'rate_limited', 'challenged', 'challenge_passed', 'challenge_failed', 'honeypot', 'would_block'],
         'wt-notification.status' => ['sent', 'failed'],
+        'wt-host.scope' => ['container', 'host'],
         'wt-auth.event' => ['login', 'failed', 'lockout', 'logout', 'password_reset', 'registered', 'verified', 'other_device_logout'],
     ];
 
@@ -361,6 +413,7 @@ class Contract
             'wt-mail' => array_map(fn ($address) => Assert::assertIsString($address), [...$record['to'], ...$record['cc'], ...$record['bcc']]),
             'wt-shield' => $record['user_agent'] === null ? null : Assert::assertLessThanOrEqual(255, mb_strlen($record['user_agent']), 'wt-shield.user_agent is at most 255 characters'),
             'wt-auth' => $record['user_agent'] === null ? null : Assert::assertLessThanOrEqual(255, mb_strlen($record['user_agent']), 'wt-auth.user_agent is at most 255 characters'),
+            'wt-host' => self::assertHost($record),
             default => null,
         };
 
@@ -378,6 +431,27 @@ class Contract
             foreach ($type === 'wt-schedule' ? array_column($record['tasks'], 'group') : [$record['group']] as $group) {
                 Assert::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $group);
             }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     */
+    public static function assertHost(array $record): void
+    {
+        self::assertShape($record['cpu'], self::HOST_CPU, 'wt-host.cpu');
+        self::assertShape($record['memory'], self::HOST_MEMORY, 'wt-host.memory');
+        self::assertShape($record['processes'], self::HOST_PROCESSES, 'wt-host.processes');
+        Assert::assertLessThanOrEqual(10, count($record['disks']), 'wt-host.disks has at most 10 entries');
+        Assert::assertLessThanOrEqual(15, count($record['processes']['top']), 'wt-host.processes.top has at most 15 entries');
+
+        foreach ($record['disks'] as $disk) {
+            self::assertShape($disk, self::HOST_DISK, 'wt-host.disks[]');
+        }
+
+        foreach ($record['processes']['top'] as $process) {
+            self::assertShape($process, self::HOST_PROCESS, 'wt-host.processes.top[]');
+            Assert::assertLessThanOrEqual(300, mb_strlen($process['command']), 'wt-host.processes.top[].command is at most 300 characters');
         }
     }
 

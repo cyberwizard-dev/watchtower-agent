@@ -4,6 +4,14 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-12
+
+### Added
+
+- `wt-host` (`host`, on by default, `WATCHTOWER_AGENT_HOST`): server metrics sent every minute by the new `watchtower:host-snapshot` command (scheduled `everyMinute()->withoutOverlapping(5)`). CPU cores, load and usage (two `/proc/stat` samples 500 ms apart), memory and swap, the container memory limit and usage from cgroup v2 or v1 when limited, disk usage for `/` and `storage_path()` (`WATCHTOWER_AGENT_HOST_DISKS`, deduplicated by file system, at most 10), uptime, hostname, OS and the process count with the top 15 processes (top by CPU and by memory, sorted by CPU) with user, name, command line, CPU %, memory and start time. Read from `/proc` on Linux; macOS falls back to `sysctl`, `vm_stat` and `ps`. Unreadable values are `null`; the command never fails on a read.
+- `WATCHTOWER_AGENT_HOST_PROC` points the agent at a read-only mount of the host's `/proc` (e.g. `/proc:/host/proc:ro`) to report every process on the server (`"scope": "host"`) instead of the container's. Off by default because other processes' command lines become visible; commands are capped at 300 characters and secret-looking arguments (`--password=…`, `--token=…`, mysql `-p…`, `*KEY=`/`*SECRET=`/`*TOKEN=`/`*PASSWORD=` assignments, URL passwords) are replaced with `[redacted]`. `WATCHTOWER_AGENT_HOST_PASSWD` maps uids to user names from the host's `/etc/passwd`.
+- `wt-hello` lists `host` when enabled.
+
 ## [0.5.0] - 2026-11-12
 
 ### Added

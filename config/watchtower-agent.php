@@ -48,6 +48,7 @@ return [
         'notifications' => (bool) env('WATCHTOWER_AGENT_NOTIFICATIONS', true),
         'shield' => (bool) env('WATCHTOWER_AGENT_SHIELD', false),
         'browser' => (bool) env('WATCHTOWER_AGENT_BROWSER', true),
+        'host' => (bool) env('WATCHTOWER_AGENT_HOST', true),
     ],
 
     /*
@@ -322,6 +323,32 @@ return [
         'beacons_per_minute' => (int) env('WATCHTOWER_AGENT_BROWSER_BEACONS_PER_MINUTE', 120),
         // Session replay chunks forwarded per visitor IP (replay is turned on in Watch Tower).
         'replay_chunks_per_minute' => (int) env('WATCHTOWER_AGENT_BROWSER_REPLAY_CHUNKS_PER_MINUTE', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Server metrics (wt-host)
+    |--------------------------------------------------------------------------
+    |
+    | Sent every minute by watchtower:host-snapshot: CPU, memory, disks and the
+    | top processes. proc_path is read on Linux; point it at a read-only
+    | mount of the host's /proc (e.g. /host/proc) to report the whole server
+    | instead of this container ("scope": "host"). That also exposes the
+    | command lines of every process on the server; secret-looking arguments
+    | are redacted. passwd_path maps uids to user names (mount the host's
+    | /etc/passwd next to /proc for host scope). disks are paths whose file
+    | system is measured; paths on the same file system are reported once.
+    | Elsewhere (macOS) sysctl, vm_stat and ps are used, or null.
+    |
+    */
+
+    'host' => [
+        'proc_path' => env('WATCHTOWER_AGENT_HOST_PROC', '/proc'),
+        'passwd_path' => env('WATCHTOWER_AGENT_HOST_PASSWD', '/etc/passwd'),
+        'cgroup_path' => env('WATCHTOWER_AGENT_HOST_CGROUP', '/sys/fs/cgroup'),
+        'disks' => $csv(env('WATCHTOWER_AGENT_HOST_DISKS')) ?? ['/', storage_path()],
+        'sample_ms' => (int) env('WATCHTOWER_AGENT_HOST_SAMPLE_MS', 500),
+        'max_processes' => 2000,
     ],
 
     /*
