@@ -34,6 +34,7 @@ class Contract
     public const IN_EXECUTION = [
         'wt-event', 'wt-event-summary', 'wt-listener-run', 'wt-broadcast', 'wt-cache-op',
         'wt-mail', 'wt-http', 'wt-webhook-in', 'wt-trace-link', 'wt-auth', 'wt-shield',
+        'wt-notification',
     ];
 
     public const TYPES = [
@@ -215,6 +216,19 @@ class Contract
             'user_agent' => '?string',
             'remember' => '?bool',
         ],
+        'wt-notification' => [
+            'notification_id' => '?string',
+            'notification' => 'string',
+            'channel' => 'string',
+            'status' => 'string',
+            'notifiable_type' => '?string',
+            'notifiable_class' => '?string',
+            'notifiable_key' => '?string',
+            'label' => '?string',
+            'route' => '?string',
+            'duration' => '?int',
+            'error' => '?string',
+        ],
         'wt-shield' => [
             'action' => 'string',
             'rule' => 'string',
@@ -300,6 +314,7 @@ class Contract
         'wt-event.listeners.status' => ['ok', 'failed', 'queued'],
         'wt-broadcast.channels.type' => ['public', 'private', 'presence'],
         'wt-shield.action' => ['blocked', 'rate_limited', 'challenged', 'challenge_passed', 'challenge_failed', 'honeypot', 'would_block'],
+        'wt-notification.status' => ['sent', 'failed'],
         'wt-auth.event' => ['login', 'failed', 'lockout', 'logout', 'password_reset', 'registered', 'verified', 'other_device_logout'],
     ];
 

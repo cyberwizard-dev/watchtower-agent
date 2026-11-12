@@ -2,6 +2,20 @@
 
 Notable changes to `cyberwizard/watchtower-agent` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.0] - 2026-11-12
+
+### Added
+
+- Session replay through the first-party proxy: `GET {path}/r.js` serves Watch Tower's recorder (cached like the script), `GET {path}/c` forwards the replay settings request (cached for a minute; `{"replay":null}` when Watch Tower is unreachable or too old) and `POST {path}/r` forwards a recorded chunk (up to 1 MB, rate limited per IP with `WATCHTOWER_AGENT_BROWSER_REPLAY_CHUNKS_PER_MINUTE`, 30). Watch Tower's 4xx answers to a chunk are passed on so the recorder stops. Needs Watch Tower with session replay.
+- `wt-notification` (`notifications`, on by default): one in-execution record per recipient and channel from `NotificationSent` and `NotificationFailed`, with the notification id, class and channel, the recipient's type, class, key and label (`notifications.label_attribute` / `WATCHTOWER_AGENT_NOTIFICATION_LABEL`, default `name`, read from loaded attributes only, else `User #42`), its route on the channel (e-mail address, phone number, …) sent unmasked unless `WATCHTOWER_AGENT_NOTIFICATION_RECIPIENT_ROUTES=false`, the duration from `NotificationSending` and, for failures, the redacted exception (1,000 characters at most). Failures are sent immediately; sent records are buffered. Capped at 100 per execution. Nightwatch's notification record has no recipient and is never marked failed, so Watch Tower needs this to show who received a notification and which ones failed.
+- `wt-hello` lists `notifications` when enabled.
+
+### Fixed
+
+- The agent's scheduled tasks no longer stop for up to a day after a run is killed mid-way (for example by a redeploy): their `withoutOverlapping` locks now expire after 5 minutes for the every-minute tasks (`health-report`, `queue-snapshot`, `actions`, `shield-sync`), 15 for `schedule-sync` and 30 for `hello`, instead of Laravel's default 24 hours. A leftover lock would otherwise stop in-app health reports, and Watch Tower would show the checks as Unknown.
+
 ## [0.4.2] - 2026-11-11
 
 ### Fixed

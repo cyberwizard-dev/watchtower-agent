@@ -21,6 +21,8 @@ beforeEach(function () {
         'watchtower-agent.browser.proxy' => true,
     ]);
     Cache::forget(BrowserProxyController::SCRIPT_CACHE_KEY);
+    Cache::forget(BrowserProxyController::RECORDER_CACHE_KEY);
+    Cache::forget(BrowserProxyController::REPLAY_CONFIG_CACHE_KEY);
 });
 
 it('renders a first-party script tag that never contains the server token', function () {
@@ -101,4 +103,47 @@ it('defines its rate limiter even when the routes come from the route cache', fu
         ->invoke(new WatchtowerAgentServiceProvider(app()));
 
     expect(RateLimiter::limiter('watchtower-browser'))->not->toBeNull();
+});
+
+it('serves the session replay recorder and its settings from the app', function () {
+    Http::fake([
+        'watchtower.test/watchtower-replay.js' => Http::response('/* recorder */'),
+        'watchtower.test/api/browser/v1/browser-key-123/config' => Http::response('{"replay":{"sample":0.1}}'),
+    ]);
+
+    $this->get('/_t/r.js')->assertOk()->assertHeader('Content-Type', 'application/javascript; charset=utf-8')->assertSee('/* recorder */', false);
+    $this->get('/_t/c')->assertOk()->assertExactJson(['replay' => ['sample' => 0.1]]);
+    $this->get('/_t/c')->assertOk();
+
+    Http::assertSentCount(2);
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/config')
+        && $request->hasHeader('Authorization', 'Bearer env-token')
+        && $request->hasHeader('X-Watchtower-Origin', 'http://localhost'));
+});
+
+it('forwards replay chunks and passes a refusal on so the recorder stops', function () {
+    Http::fakeSequence('watchtower.test/api/browser/v1/browser-key-123/replay')
+        ->push('', 204)
+        ->push('Session replay is off', 403)
+        ->push('', 500);
+    $chunk = gzencode('{"session":"abc123","seq":0,"events":[]}');
+
+    $send = fn () => $this->call('POST', '/_t/r', [], [], [], ['CONTENT_TYPE' => 'text/plain', 'HTTP_USER_AGENT' => 'Mozilla/5.0 Chrome/131.0'], $chunk);
+
+    $send()->assertNoContent();
+    $send()->assertForbidden();
+    $send()->assertNoContent();
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/replay')
+        && $request->hasHeader('Authorization', 'Bearer env-token')
+        && $request->hasHeader('X-Watchtower-User-Agent', 'Mozilla/5.0 Chrome/131.0')
+        && $request->body() === $chunk);
+
+    $this->call('POST', '/_t/r', [], [], [], ['CONTENT_TYPE' => 'text/plain'], str_repeat('a', BrowserProxyController::MAX_REPLAY_BYTES + 1))->assertStatus(413);
+});
+
+it('answers replay off when Watch Tower does not know replay yet', function () {
+    Http::fake(['watchtower.test/*' => Http::response('Not found', 404)]);
+
+    $this->get('/_t/c')->assertOk()->assertExactJson(['replay' => null]);
 });

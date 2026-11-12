@@ -27,6 +27,7 @@ use Cyberwizard\WatchtowerAgent\Health\HealthCheckRegistry;
 use Cyberwizard\WatchtowerAgent\Http\HttpRecorder;
 use Cyberwizard\WatchtowerAgent\Http\Middleware\RecordTraceparent;
 use Cyberwizard\WatchtowerAgent\Mail\MailRecorder;
+use Cyberwizard\WatchtowerAgent\Notifications\NotificationRecorder;
 use Cyberwizard\WatchtowerAgent\Output\OutputCapture;
 use Cyberwizard\WatchtowerAgent\Queue\JobLifecycle;
 use Cyberwizard\WatchtowerAgent\Queue\QueuePayload;
@@ -98,6 +99,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->app->singleton(CacheOpRecorder::class);
         $this->app->singleton(HttpRecorder::class);
         $this->app->singleton(AuthRecorder::class);
+        $this->app->singleton(NotificationRecorder::class);
         $this->app->singleton(RulesRepository::class);
         $this->app->singleton(Evaluator::class);
         $this->app->singleton(ShieldRecorder::class);
@@ -207,7 +209,8 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
     }
 
     /**
-     * Events, broadcasts, cache operations, mail, outgoing HTTP, webhooks, trace context and auth.
+     * Events, broadcasts, cache operations, mail, notifications, outgoing HTTP, webhooks, trace
+     * context and auth.
      * Every hook checks its feature flag when it runs; none of them can throw into the app.
      */
     private function registerObservability(Dispatcher $events): void
@@ -234,6 +237,16 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $events->listen(JobQueued::class, [MailRecorder::class, 'queued']);
         $events->listen(MessageSending::class, [MailRecorder::class, 'sending']);
         $events->listen(MessageSent::class, [MailRecorder::class, 'sent']);
+
+        foreach ([
+            'Illuminate\Notifications\Events\NotificationSending' => 'sending',
+            'Illuminate\Notifications\Events\NotificationSent' => 'sent',
+            'Illuminate\Notifications\Events\NotificationFailed' => 'failed',
+        ] as $event => $method) {
+            if (class_exists($event)) {
+                $events->listen($event, [NotificationRecorder::class, $method]);
+            }
+        }
 
         // illuminate/auth is not a dependency; listen only to the events that exist.
         foreach (array_keys(AuthRecorder::EVENTS) as $event) {
@@ -332,6 +345,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         // Defined on every boot: with `route:cache` the routes come from the cache, but their
         // throttle middleware still looks this limiter up on each request.
         RateLimiter::for('watchtower-browser', fn (Request $request) => Limit::perMinute(max(1, (int) config('watchtower-agent.browser.beacons_per_minute', 120)))->by('watchtower-browser:'.$request->ip()));
+        RateLimiter::for('watchtower-browser-replay', fn (Request $request) => Limit::perMinute(max(1, (int) config('watchtower-agent.browser.replay_chunks_per_minute', 30)))->by('watchtower-browser-replay:'.$request->ip()));
 
         if (! config('watchtower-agent.features.browser', true) || ($this->app instanceof CachesRoutes && $this->app->routesAreCached())) {
             return;
@@ -345,6 +359,9 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
             $path = BrowserTag::path();
             $router->get($path.'/s.js', [BrowserProxyController::class, 'script'])->name('watchtower.browser.script');
             $router->post($path.'/e', [BrowserProxyController::class, 'beacon'])->middleware(ThrottleRequests::using('watchtower-browser'))->name('watchtower.browser.beacon');
+            $router->get($path.'/r.js', [BrowserProxyController::class, 'recorder'])->name('watchtower.browser.recorder');
+            $router->get($path.'/c', [BrowserProxyController::class, 'replayConfig'])->middleware(ThrottleRequests::using('watchtower-browser'))->name('watchtower.browser.replay-config');
+            $router->post($path.'/r', [BrowserProxyController::class, 'replay'])->middleware(ThrottleRequests::using('watchtower-browser-replay'))->name('watchtower.browser.replay');
         });
     }
 
@@ -383,32 +400,36 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $kernel->setGlobalMiddleware($middleware);
     }
 
+    /**
+     * The agent's own tasks. Overlap locks expire after a few runs (not Laravel's default 24 hours), so a run
+     * killed mid-way, e.g. by a redeploy, cannot block reports for a day.
+     */
     private function scheduleCommands(Schedule $schedule): void
     {
         if (! WatchtowerAgent::enabled() || ! config('watchtower-agent.schedule_commands', true)) {
             return;
         }
 
-        $schedule->command(HelloCommand::class)->hourly()->withoutOverlapping();
+        $schedule->command(HelloCommand::class)->hourly()->withoutOverlapping(30);
 
         if (WatchtowerAgent::feature('schedule')) {
-            $schedule->command(ScheduleSyncCommand::class)->everyTenMinutes()->withoutOverlapping();
+            $schedule->command(ScheduleSyncCommand::class)->everyTenMinutes()->withoutOverlapping(15);
         }
 
         if (WatchtowerAgent::feature('queues')) {
-            $schedule->command(QueueSnapshotCommand::class)->everyMinute()->withoutOverlapping();
+            $schedule->command(QueueSnapshotCommand::class)->everyMinute()->withoutOverlapping(5);
         }
 
         if (WatchtowerAgent::feature('health')) {
-            $schedule->command(HealthReportCommand::class)->everyMinute()->withoutOverlapping();
+            $schedule->command(HealthReportCommand::class)->everyMinute()->withoutOverlapping(5);
         }
 
         if (WatchtowerAgent::feature('actions')) {
-            $schedule->command(ActionsCommand::class)->everyMinute()->withoutOverlapping();
+            $schedule->command(ActionsCommand::class)->everyMinute()->withoutOverlapping(5);
         }
 
         if (WatchtowerAgent::feature('shield')) {
-            $schedule->command(ShieldSyncCommand::class)->everyMinute()->withoutOverlapping();
+            $schedule->command(ShieldSyncCommand::class)->everyMinute()->withoutOverlapping(5);
         }
     }
 }
