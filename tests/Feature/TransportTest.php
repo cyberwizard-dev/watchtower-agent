@@ -3,6 +3,7 @@
 use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Records\RecordFactory;
+use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Cyberwizard\WatchtowerAgent\Transport;
 use Cyberwizard\WatchtowerAgent\WatchtowerAgent;
 use Laravel\Nightwatch\Core;
@@ -99,4 +100,37 @@ it('does not force sampling when Nightwatch is paused', function () {
     app(Transport::class)->sample();
 
     expect($core->sampling())->toBeFalse();
+});
+
+it('pauses Nightwatch while the agent calls home so its own requests are not recorded', function () {
+    $core = app(Core::class);
+
+    $pausedInside = Guard::quietly(fn () => $core->paused());
+
+    expect($pausedInside)->toBeTrue()
+        ->and($core->paused())->toBeFalse()
+        ->and(Guard::active())->toBeFalse();
+});
+
+it('keeps Nightwatch paused after quietly when the app had already paused it', function () {
+    $core = app(Core::class);
+    $core->pause();
+
+    Guard::quietly(fn () => null);
+
+    expect($core->paused())->toBeTrue();
+});
+
+it('lets exceptions from quiet calls reach the caller and resumes Nightwatch', function () {
+    $core = app(Core::class);
+
+    expect(fn () => Guard::quietly(fn () => throw new RuntimeException('home unreachable')))
+        ->toThrow(RuntimeException::class, 'home unreachable')
+        ->and($core->paused())->toBeFalse();
+});
+
+it('still runs quiet calls when Nightwatch is not bound', function () {
+    $this->app->offsetUnset(Core::class);
+
+    expect(Guard::quietly(fn () => 'ran'))->toBe('ran');
 });

@@ -4,6 +4,12 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-13
+
+### Fixed
+
+- The agent's own calls to Watch Tower (Shield rules sync, action pulls, browser and replay proxying) no longer show up as the host app's outgoing requests. `Guard::quietly()` now also pauses Nightwatch while it runs (through `Transport::ignoring()`), so Nightwatch's outgoing-request sensor doesn't record them either. Previously each app logged about two outgoing requests a minute to its own Watch Tower.
+
 ## [0.6.0] - 2026-11-12
 
 ### Added
