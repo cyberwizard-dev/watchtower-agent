@@ -29,6 +29,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Shield (bot and spam protection)](#shield-bot-and-spam-protection)
 - [Browser monitoring](#browser-monitoring)
 - [Server metrics](#server-metrics)
+- [Sample rates from Watch Tower](#sample-rates-from-watch-tower)
 - [Commands](#commands)
 - [How records are sent](#how-records-are-sent)
 - [Testing](#testing)
@@ -106,6 +107,9 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_AUTH_IDENTIFIER_KEYS` | `email,username,login,phone` | Credential / request keys the identifier is read from. Nothing else is read. |
 | `WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS` | `10` | At most one `failed`/`lockout` record per event, IP and identifier in this window (`0` = every one). |
 | `WATCHTOWER_AGENT_SHIELD` | `false` | Shield: bot and spam protection from rules managed in Watch Tower. |
+| `WATCHTOWER_AGENT_SETTINGS` | `true` | Use the sample rates set in Watch Tower. See [Sample rates from Watch Tower](#sample-rates-from-watch-tower). |
+| `WATCHTOWER_AGENT_SETTINGS_TIMEOUT` | `5` | Seconds to wait for Watch Tower when syncing settings. |
+| `WATCHTOWER_AGENT_SETTINGS_CACHE_STORE` | default store | Cache store holding the synced settings. |
 | `WATCHTOWER_AGENT_SHIELD_MODE` | rules' mode | `monitor` or `enforce`, overriding the mode Watch Tower sends. |
 | `WATCHTOWER_AGENT_SHIELD_THROTTLE_SECONDS` | `10` | At most one `wt-shield` record per action, rule and IP in this window (`0` = every one). |
 | `WATCHTOWER_AGENT_SHIELD_SAMPLE_DECISIONS` | `true` | A decision that is sent also makes Nightwatch keep the request it was made for, whatever the request sample rate. |
@@ -475,6 +479,16 @@ Mount it only on the service that runs the scheduler, so each server reports onc
 
 This is off by default because it widens what the app can see: with the host's `/proc` mounted, the command line of every process on the server (other apps, databases, deploy tooling) is readable by the app and sent to Watch Tower. Commands are capped at 300 characters and secret-looking arguments are replaced with `[redacted]` before they leave the app: `--password=…`, `--token=…`, `--secret …` and other `key`, `secret`, `token` and `password` options, `-p<value>` for `mysql`/`mariadb` tools, `*KEY=…`, `*SECRET=…`, `*TOKEN=…` and `*PASSWORD=…` assignments, and the password in URLs like `redis://user:pass@host`. Redaction is pattern-based, so a secret passed in another shape can still get through; prefer environment variables or files for credentials.
 
+## Sample rates from Watch Tower
+
+On by default (`WATCHTOWER_AGENT_SETTINGS`). Nightwatch's sample rates for requests, commands, exceptions and scheduled tasks can be set per environment in Watch Tower (Settings → Environments → Sampling) instead of in each app's `.env`.
+
+`watchtower:settings-sync` pulls them every five minutes from `GET {NIGHTWATCH_BASE_URL}/api/agent/v1/settings` with `NIGHTWATCH_TOKEN` (ETag / 304) and keeps the last good copy in the cache. Every process applies them to Nightwatch: at boot (each PHP-FPM request), before each Octane request and on every queue worker loop, reading the cache at most once a minute. A change in Watch Tower takes effect within about six minutes, with no redeploy.
+
+A rate left unset in Watch Tower keeps the app's own value (`NIGHTWATCH_REQUEST_SAMPLE_RATE` and so on), and clearing one restores it. When Watch Tower can't be reached the last good settings stay in use; with none cached, the app's own rates apply. The sync call itself is never recorded.
+
+The page-load rate for browser monitoring comes from the same Watch Tower setting; the browser script reads it from Watch Tower's config response, so nothing in the app changes.
+
 ## Commands
 
 | Command | Schedule |
@@ -486,6 +500,7 @@ This is off by default because it widens what the app can see: with the host's `
 | `watchtower:actions` | every minute, only when actions are enabled |
 | `watchtower:shield-sync` | every minute, only when Shield is enabled |
 | `watchtower:host-snapshot` | every minute |
+| `watchtower:settings-sync` | every 5 minutes |
 
 Set `WATCHTOWER_AGENT_SCHEDULE_COMMANDS=false` to schedule them yourself.
 

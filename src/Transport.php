@@ -8,6 +8,7 @@ use Illuminate\Contracts\Container\Container;
 use JsonSerializable;
 use Laravel\Nightwatch\Core;
 use Throwable;
+use WeakMap;
 
 /**
  * The only class that talks to Nightwatch's Core. Ingest is internal to Nightwatch, so a change
@@ -15,6 +16,13 @@ use Throwable;
  */
 class Transport implements RecordTransport
 {
+    /**
+     * Each Core's own sample rates before Watch Tower changed any, so an unset rate restores them.
+     *
+     * @var WeakMap<Core<mixed>, array<string, mixed>>|null
+     */
+    private static ?WeakMap $originalSampling = null;
+
     public function __construct(private Container $container) {}
 
     public function send(array $record): bool
@@ -83,6 +91,42 @@ class Transport implements RecordTransport
         try {
             // Core::sample() is Nightwatch's public API; a rate of 1.0 always keeps the execution.
             $core->sample(1.0);
+        } catch (Throwable) {
+            //
+        }
+    }
+
+    /**
+     * Set Nightwatch's sample rates (0..1) for the executions that start from now on. A null
+     * rate restores the app's own value. Nightwatch reads these when a request, command or
+     * scheduled task starts, and for exceptions in executions it did not sample.
+     *
+     * @param  array<string, float|null>  $rates
+     */
+    public function applySampling(array $rates): void
+    {
+        $core = $this->core();
+
+        if ($core === null) {
+            return;
+        }
+
+        try {
+            self::$originalSampling ??= new WeakMap;
+            self::$originalSampling[$core] ??= (array) ($core->config['sampling'] ?? []);
+            $original = self::$originalSampling[$core];
+
+            foreach ($rates as $key => $rate) {
+                if ($rate === null) {
+                    if (array_key_exists($key, $original)) {
+                        $core->config['sampling'][$key] = $original[$key];
+                    }
+
+                    continue;
+                }
+
+                $core->config['sampling'][$key] = max(0.0, min(1.0, (float) $rate));
+            }
         } catch (Throwable) {
             //
         }

@@ -49,6 +49,7 @@ return [
         'shield' => (bool) env('WATCHTOWER_AGENT_SHIELD', false),
         'browser' => (bool) env('WATCHTOWER_AGENT_BROWSER', true),
         'host' => (bool) env('WATCHTOWER_AGENT_HOST', true),
+        'settings' => (bool) env('WATCHTOWER_AGENT_SETTINGS', true),
     ],
 
     /*
@@ -434,6 +435,27 @@ return [
             ? (int) env('WATCHTOWER_AGENT_HEALTH_FAILED_JOBS_DEGRADED')
             : null,
         'slow_ms' => (int) env('WATCHTOWER_AGENT_HEALTH_SLOW_MS', 1000),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Settings from Watch Tower
+    |--------------------------------------------------------------------------
+    |
+    | Sample rates set in Watch Tower (Settings → Environments → Sampling) for
+    | requests, commands, exceptions and scheduled tasks. watchtower:settings-sync
+    | pulls them every five minutes (ETag / 304) into the cache; every process
+    | applies them to Nightwatch, re-reading the cache at most once a minute.
+    | A rate left unset in Watch Tower keeps this app's own NIGHTWATCH_*_SAMPLE_RATE.
+    | When Watch Tower can't be reached the last good settings stay in use.
+    |
+    */
+
+    'settings' => [
+        'base_url' => env('NIGHTWATCH_BASE_URL'),
+        'token' => env('NIGHTWATCH_TOKEN'),
+        'timeout' => (int) env('WATCHTOWER_AGENT_SETTINGS_TIMEOUT', 5),
+        'cache_store' => env('WATCHTOWER_AGENT_SETTINGS_CACHE_STORE'),
     ],
 
     /*
