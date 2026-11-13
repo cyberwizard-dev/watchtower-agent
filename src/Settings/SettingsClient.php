@@ -46,6 +46,8 @@ class SettingsClient
             $request = $request->withHeaders(['If-None-Match' => '"'.$version.'"']);
         }
 
+        $request = $request->withHeaders(['X-Watchtower-App-Sampling' => $this->appSampling()]);
+
         $url = rtrim((string) $this->config->get('watchtower-agent.settings.base_url'), '/').'/api/agent/v1/settings';
         $response = Guard::quietly(fn () => $request->get($url));
 
@@ -60,5 +62,24 @@ class SettingsClient
         }
 
         return $data;
+    }
+
+    /**
+     * The app's own sample rates (its NIGHTWATCH_*_SAMPLE_RATE values and the browser
+     * script's data-sample), so Watch Tower can show what is in effect where it sets nothing.
+     */
+    private function appSampling(): string
+    {
+        $rates = [];
+
+        foreach (['requests', 'commands', 'exceptions', 'scheduled_tasks'] as $key) {
+            $value = $this->config->get("nightwatch.sampling.{$key}");
+            $rates[$key] = is_numeric($value) ? round(max(0.0, min(1.0, (float) $value)), 4) : null;
+        }
+
+        $browser = $this->config->get('watchtower-agent.browser.sample');
+        $rates['browser'] = is_numeric($browser) ? round(max(0.0, min(1.0, (float) $browser)), 4) : null;
+
+        return (string) json_encode($rates);
     }
 }

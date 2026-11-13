@@ -168,3 +168,16 @@ it('applies new rates in long-running queue workers on their loop', function () 
 
     expect($core->config['sampling']['requests'])->toBe(0.4);
 });
+
+it('tells Watch Tower the app\'s own sample rates', function () {
+    config(['nightwatch.sampling.requests' => '0.1', 'nightwatch.sampling.commands' => 1.0, 'watchtower-agent.browser.sample' => null]);
+    Http::fake([SETTINGS_URL => Http::response(agentSettings([]), 200, ['ETag' => '"v1"'])]);
+
+    $this->artisan('watchtower:settings-sync')->assertSuccessful();
+
+    Http::assertSent(function (Request $request) {
+        $sent = json_decode($request->header('X-Watchtower-App-Sampling')[0] ?? '', true);
+
+        return $sent['requests'] === 0.1 && $sent['commands'] === 1 && $sent['browser'] === null;
+    });
+});
