@@ -2,6 +2,7 @@
 
 namespace Cyberwizard\WatchtowerAgent\Support;
 
+use Cyberwizard\WatchtowerAgent\Transport;
 use Throwable;
 
 /**
@@ -41,7 +42,8 @@ final class Guard
     }
 
     /**
-     * Run code that must not be recorded but whose exceptions belong to the caller.
+     * Run code that must not be recorded, by the agent or by Nightwatch, but whose exceptions
+     * belong to the caller.
      *
      * @template TReturn
      *
@@ -53,7 +55,7 @@ final class Guard
         self::$depth++;
 
         try {
-            return $callback();
+            return Transport::ignoring($callback);
         } finally {
             self::$depth--;
         }

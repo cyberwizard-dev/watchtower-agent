@@ -3,6 +3,7 @@
 namespace Cyberwizard\WatchtowerAgent;
 
 use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
+use Illuminate\Container\Container as ContainerInstance;
 use Illuminate\Contracts\Container\Container;
 use JsonSerializable;
 use Laravel\Nightwatch\Core;
@@ -85,6 +86,30 @@ class Transport implements RecordTransport
         } catch (Throwable) {
             //
         }
+    }
+
+    /**
+     * Run a callback with Nightwatch paused, so the agent's own calls home (rules, actions,
+     * browser proxying) never show up as the host app's outgoing requests or queries.
+     * The callback's exceptions belong to the caller.
+     *
+     * @template TReturn
+     *
+     * @param  callable(): TReturn  $callback
+     * @return TReturn
+     */
+    public static function ignoring(callable $callback): mixed
+    {
+        $core = null;
+
+        try {
+            $container = ContainerInstance::getInstance();
+            $core = (new self($container))->core();
+        } catch (Throwable) {
+            //
+        }
+
+        return $core === null ? $callback() : $core->ignore($callback);
     }
 
     /**
