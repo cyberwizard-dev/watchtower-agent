@@ -4,6 +4,13 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+### Added
+
+- Sample rates set in Watch Tower (`settings`, on by default, `WATCHTOWER_AGENT_SETTINGS`): the new `watchtower:settings-sync` command (scheduled `everyFiveMinutes()->withoutOverlapping(5)`) pulls `GET /api/agent/v1/settings` with the environment token (ETag / 304) and keeps the last good copy in the cache (`WATCHTOWER_AGENT_SETTINGS_CACHE_STORE`, `WATCHTOWER_AGENT_SETTINGS_TIMEOUT`). The request, command, exception and scheduled-task rates it carries are applied to Nightwatch at boot, before each Octane request and on every queue worker loop, reading the cache at most once a minute per process. A rate left unset in Watch Tower keeps the app's own `NIGHTWATCH_*_SAMPLE_RATE`, and clearing one restores it. A failed sync keeps the last good settings. The call is never recorded.
+- `wt-hello` lists `settings` when enabled.
+
 ## [0.6.1] - 2026-11-13
 
 ### Fixed

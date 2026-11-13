@@ -20,6 +20,7 @@ use Cyberwizard\WatchtowerAgent\Console\HelloCommand;
 use Cyberwizard\WatchtowerAgent\Console\HostSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\QueueSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\ScheduleSyncCommand;
+use Cyberwizard\WatchtowerAgent\Console\SettingsSyncCommand;
 use Cyberwizard\WatchtowerAgent\Console\ShieldSyncCommand;
 use Cyberwizard\WatchtowerAgent\Contracts\RecordTransport;
 use Cyberwizard\WatchtowerAgent\Events\EventRecorder;
@@ -36,6 +37,7 @@ use Cyberwizard\WatchtowerAgent\Records\ExecutionLimiter;
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Records\RecordFactory;
 use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
+use Cyberwizard\WatchtowerAgent\Settings\SettingsRepository;
 use Cyberwizard\WatchtowerAgent\Shield\Evaluator;
 use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
 use Cyberwizard\WatchtowerAgent\Shield\PassCookie;
@@ -43,6 +45,7 @@ use Cyberwizard\WatchtowerAgent\Shield\RulesRepository;
 use Cyberwizard\WatchtowerAgent\Shield\ShieldMiddleware;
 use Cyberwizard\WatchtowerAgent\Shield\ShieldRecorder;
 use Cyberwizard\WatchtowerAgent\Shield\VerifyChallengeController;
+use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Cyberwizard\WatchtowerAgent\Webhooks\RecordIncomingWebhook;
 use Cyberwizard\WatchtowerAgent\Webhooks\SpatieWebhookRecorder;
 use Cyberwizard\WatchtowerAgent\Workers\WorkerHeartbeat;
@@ -137,12 +140,14 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
                 ActionsCommand::class,
                 ShieldSyncCommand::class,
                 HostSnapshotCommand::class,
+                SettingsSyncCommand::class,
             ]);
         }
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower-agent');
         $this->registerShield();
         $this->registerBrowser();
+        $this->registerSettings($this->app->make(Dispatcher::class));
 
         $this->registerListeners($this->app->make(Dispatcher::class));
         $this->registerObservability($this->app->make(Dispatcher::class));
@@ -150,6 +155,29 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
             $this->scheduleCommands($schedule);
         });
+    }
+
+    /**
+     * Sample rates set in Watch Tower: applied now (every PHP-FPM request boots the app), and in
+     * long-running processes before each Octane request and on every queue worker loop. The cache
+     * is read at most once a minute per process.
+     */
+    private function registerSettings(Dispatcher $events): void
+    {
+        if (! WatchtowerAgent::feature('settings')) {
+            return;
+        }
+
+        $apply = static function (): void {
+            Guard::safely(static fn () => app(SettingsRepository::class)->apply());
+        };
+
+        $apply();
+        $events->listen(Looping::class, $apply);
+
+        if (class_exists('Laravel\Octane\Events\RequestReceived')) {
+            $events->listen('Laravel\Octane\Events\RequestReceived', $apply);
+        }
     }
 
     /**
@@ -436,6 +464,10 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         if (WatchtowerAgent::feature('host')) {
             $schedule->command(HostSnapshotCommand::class)->everyMinute()->withoutOverlapping(5);
+        }
+
+        if (WatchtowerAgent::feature('settings')) {
+            $schedule->command(SettingsSyncCommand::class)->everyFiveMinutes()->withoutOverlapping(5);
         }
     }
 }

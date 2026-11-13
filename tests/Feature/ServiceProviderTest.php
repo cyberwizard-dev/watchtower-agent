@@ -19,6 +19,7 @@ it('registers the commands', function () {
         'watchtower:health-report',
         'watchtower:actions',
         'watchtower:host-snapshot',
+        'watchtower:settings-sync',
     );
 });
 
@@ -31,12 +32,14 @@ it('schedules the agent commands without overlapping', function () {
         'watchtower:queue-snapshot',
         'watchtower:health-report',
         'watchtower:host-snapshot',
+        'watchtower:settings-sync',
     ])
         ->and($events['watchtower:hello']->expression)->toBe('0 * * * *')
         ->and($events['watchtower:schedule-sync']->expression)->toBe('*/10 * * * *')
         ->and($events['watchtower:queue-snapshot']->expression)->toBe('* * * * *')
         ->and($events['watchtower:health-report']->expression)->toBe('* * * * *')
-        ->and($events['watchtower:host-snapshot']->expression)->toBe('* * * * *');
+        ->and($events['watchtower:host-snapshot']->expression)->toBe('* * * * *')
+        ->and($events['watchtower:settings-sync']->expression)->toBe('*/5 * * * *');
 
     foreach ($events as $event) {
         expect($event->withoutOverlapping)->toBeTrue();
@@ -46,7 +49,8 @@ it('schedules the agent commands without overlapping', function () {
         ->and($events['watchtower:schedule-sync']->expiresAt)->toBe(15)
         ->and($events['watchtower:queue-snapshot']->expiresAt)->toBe(5)
         ->and($events['watchtower:health-report']->expiresAt)->toBe(5)
-        ->and($events['watchtower:host-snapshot']->expiresAt)->toBe(5);
+        ->and($events['watchtower:host-snapshot']->expiresAt)->toBe(5)
+        ->and($events['watchtower:settings-sync']->expiresAt)->toBe(5);
 });
 
 it('schedules nothing when the agent is disabled', function () {
@@ -77,6 +81,7 @@ it('merges the default config', function () {
         'shield' => false,
         'browser' => true,
         'host' => true,
+        'settings' => true,
     ])->and(config('watchtower-agent.max_output_bytes'))->toBe(65536)
         ->and(config('watchtower-agent.capture_all_task_output'))->toBeFalse()
         ->and(config('watchtower-agent.queues'))->toBeNull()
