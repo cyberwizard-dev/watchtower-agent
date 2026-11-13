@@ -4,6 +4,12 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-13
+
+### Added
+
+- The settings sync tells Watch Tower the app's own sample rates (`X-Watchtower-App-Sampling`: its `NIGHTWATCH_*_SAMPLE_RATE` values and `WATCHTOWER_AGENT_BROWSER_SAMPLE`), so **Settings → Sampling** shows the rate in effect where Watch Tower sets none.
+
 ## [0.7.0] - 2026-11-13
 
 ### Added
