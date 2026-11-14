@@ -37,6 +37,7 @@ use Cyberwizard\WatchtowerAgent\Records\ExecutionLimiter;
 use Cyberwizard\WatchtowerAgent\Records\Recorder;
 use Cyberwizard\WatchtowerAgent\Records\RecordFactory;
 use Cyberwizard\WatchtowerAgent\Records\RecordThrottle;
+use Cyberwizard\WatchtowerAgent\Settings\RecordSampler;
 use Cyberwizard\WatchtowerAgent\Settings\SettingsRepository;
 use Cyberwizard\WatchtowerAgent\Shield\Evaluator;
 use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
@@ -178,6 +179,10 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         if (class_exists('Laravel\Octane\Events\RequestReceived')) {
             $events->listen('Laravel\Octane\Events\RequestReceived', $apply);
         }
+
+        // Per-record rates (queries, cache events, ...): reject callbacks on Nightwatch's core,
+        // added once whether the core is resolved before or after this provider boots.
+        Guard::safely(fn () => $this->app->make(RecordSampler::class)->register());
     }
 
     /**

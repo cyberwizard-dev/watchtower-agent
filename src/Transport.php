@@ -23,7 +23,55 @@ class Transport implements RecordTransport
      */
     private static ?WeakMap $originalSampling = null;
 
+    /**
+     * Cores that already have the agent's reject callbacks, so they are added once.
+     *
+     * @var WeakMap<Core<mixed>, true>|null
+     */
+    private static ?WeakMap $rejecting = null;
+
     public function __construct(private Container $container) {}
+
+    /**
+     * Add reject callbacks (Nightwatch reject method => callback) to Nightwatch's core: now if it
+     * is resolved, and to a core resolved later. Once per core; Nightwatch keeps the app's own
+     * callbacks next to these. Unlike core(), this does not skip a disabled or paused core, since
+     * the callbacks must be in place when it starts capturing.
+     *
+     * @param  array<string, callable>  $callbacks
+     */
+    public function rejectRecords(array $callbacks): void
+    {
+        $register = static function (mixed $core) use ($callbacks): void {
+            if (! $core instanceof Core) {
+                return;
+            }
+
+            self::$rejecting ??= new WeakMap;
+
+            if (isset(self::$rejecting[$core])) {
+                return;
+            }
+
+            self::$rejecting[$core] = true;
+
+            foreach ($callbacks as $method => $callback) {
+                if (method_exists($core, $method)) {
+                    $core->{$method}($callback);
+                }
+            }
+        };
+
+        try {
+            $this->container->afterResolving(Core::class, $register);
+
+            if ($this->container->resolved(Core::class)) {
+                $register($this->container->make(Core::class));
+            }
+        } catch (Throwable) {
+            //
+        }
+    }
 
     public function send(array $record): bool
     {

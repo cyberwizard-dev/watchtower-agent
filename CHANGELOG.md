@@ -4,6 +4,12 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
+### Added
+
+- Per-record sample rates from Watch Tower: queries, cache events, outgoing requests, queued jobs, mail and notifications, each with its own rate, applied through Nightwatch's reject callbacks inside the executions Nightwatch keeps. Unset keeps every record; the app's own reject callbacks keep working. Dropped records still count in their execution's totals. Callbacks are added once per Nightwatch core, through `Transport::rejectRecords()`.
+
 ## [0.7.1] - 2026-11-13
 
 ### Added

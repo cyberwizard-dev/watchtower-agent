@@ -12,7 +12,7 @@ use Cyberwizard\WatchtowerAgent\Webhooks\WebhookState;
 
 class WatchtowerAgent
 {
-    public const VERSION = '0.7.1';
+    public const VERSION = '0.8.0';
 
     /**
      * Every feature the package knows about, in the order the hello record lists them.

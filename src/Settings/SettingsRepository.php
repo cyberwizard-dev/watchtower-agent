@@ -24,10 +24,21 @@ class SettingsRepository
     /** Nightwatch sampling keys Watch Tower may set. */
     public const SAMPLING_KEYS = ['requests', 'commands', 'exceptions', 'scheduled_tasks'];
 
+    /**
+     * Record types sampled one by one inside the executions Nightwatch keeps, through its
+     * reject callbacks (see RecordSampler).
+     */
+    public const RECORD_KEYS = ['queries', 'cache_events', 'outgoing_requests', 'queued_jobs', 'mail', 'notifications'];
+
     /** @var array<string, float|null>|null */
     private static ?array $memo = null;
 
     private static ?int $memoAt = null;
+
+    /** @var array<string, float|null>|null */
+    private static ?array $recordMemo = null;
+
+    private static ?int $recordMemoAt = null;
 
     public function __construct(
         private CacheFactory $cache,
@@ -111,10 +122,46 @@ class SettingsRepository
         $this->transport->applySampling(self::$memo);
     }
 
+    /**
+     * Per-record rates Watch Tower set (0..1), null for each one left at 100%.
+     *
+     * @return array<string, float|null>
+     */
+    public function recordRates(): array
+    {
+        $sampling = $this->current()['sampling'] ?? [];
+        $rates = [];
+
+        foreach (self::RECORD_KEYS as $key) {
+            $value = is_array($sampling) ? ($sampling[$key] ?? null) : null;
+            $rates[$key] = is_numeric($value) ? max(0.0, min(1.0, (float) $value)) : null;
+        }
+
+        return $rates;
+    }
+
+    /**
+     * The rate for one record type, read from the cache at most once per MEMO_SECONDS, since
+     * the reject callbacks ask for every query and cache event.
+     */
+    public function recordRate(string $key): ?float
+    {
+        $now = Carbon::now()->getTimestamp();
+
+        if (self::$recordMemo === null || self::$recordMemoAt === null || $now - self::$recordMemoAt >= self::MEMO_SECONDS) {
+            self::$recordMemo = $this->recordRates();
+            self::$recordMemoAt = $now;
+        }
+
+        return self::$recordMemo[$key] ?? null;
+    }
+
     public static function forgetMemo(): void
     {
         self::$memo = null;
         self::$memoAt = null;
+        self::$recordMemo = null;
+        self::$recordMemoAt = null;
     }
 
     /**

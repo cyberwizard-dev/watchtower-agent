@@ -1,9 +1,12 @@
 <?php
 
+use Cyberwizard\WatchtowerAgent\Settings\RecordSampler;
 use Cyberwizard\WatchtowerAgent\Settings\SettingsRepository;
 use Cyberwizard\WatchtowerAgent\Transport;
 use Illuminate\Http\Client\Request;
 use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Nightwatch\Core;
 
@@ -180,4 +183,66 @@ it('tells Watch Tower the app\'s own sample rates', function () {
 
         return $sent['requests'] === 0.1 && $sent['commands'] === 1 && $sent['browser'] === null;
     });
+});
+
+it('reads per-record rates, clamped, with null for record types Watch Tower left alone', function () {
+    $repository = app(SettingsRepository::class);
+    $repository->store()->forever(SettingsRepository::KEY, ['settings' => agentSettings(['queries' => 0.3, 'mail' => 7, 'cache_events' => -2]), 'fetched_at' => time()]);
+
+    expect($repository->recordRates())->toBe([
+        'queries' => 0.3, 'cache_events' => 0.0, 'outgoing_requests' => null,
+        'queued_jobs' => null, 'mail' => 1.0, 'notifications' => null,
+    ]);
+});
+
+it('keeps a record by its rate: always without one, never at 0, a share in between', function () {
+    $repository = app(SettingsRepository::class);
+    $sampler = app(RecordSampler::class);
+    $repository->store()->forever(SettingsRepository::KEY, ['settings' => agentSettings(['queries' => 0.3, 'cache_events' => 0.0, 'mail' => 1.0]), 'fetched_at' => time()]);
+
+    RecordSampler::useRandom(fn () => 0.29);
+    expect($sampler->keep('queries'))->toBeTrue();
+
+    RecordSampler::useRandom(fn () => 0.31);
+    expect($sampler->keep('queries'))->toBeFalse()
+        ->and($sampler->keep('cache_events'))->toBeFalse()
+        ->and($sampler->keep('mail'))->toBeTrue()
+        ->and($sampler->keep('notifications'))->toBeTrue();
+
+    RecordSampler::useRandom(null);
+});
+
+it('drops sampled-out queries from Nightwatch and keeps the rest of the execution', function () {
+    $repository = app(SettingsRepository::class);
+    $queries = fn () => collect($this->ingest->written)->where('t', 'query')->count();
+
+    $repository->store()->forever(SettingsRepository::KEY, ['settings' => agentSettings(['queries' => 0.0]), 'fetched_at' => time()]);
+    DB::select('select 1');
+    expect($queries())->toBe(0);
+
+    SettingsRepository::forgetMemo();
+    $repository->store()->forever(SettingsRepository::KEY, ['settings' => agentSettings(['queries' => null]), 'fetched_at' => time()]);
+    DB::select('select 1');
+    expect($queries())->toBe(1);
+});
+
+it('drops sampled-out cache events and leaves queries alone', function () {
+    app(SettingsRepository::class)->store()->forever(SettingsRepository::KEY, ['settings' => agentSettings(['cache_events' => 0.0]), 'fetched_at' => time()]);
+
+    Cache::get('some-key');
+    DB::select('select 1');
+
+    $types = collect($this->ingest->written)->pluck('t');
+    expect($types)->not->toContain('cache-event')
+        ->and($types)->toContain('query');
+});
+
+it('adds its reject callbacks to a Nightwatch core only once', function () {
+    $core = app(Core::class);
+
+    app(RecordSampler::class)->register();
+    app(RecordSampler::class)->register();
+
+    $callbacks = (fn () => $this->rejectQueryCallbacks)->call($core);
+    expect($callbacks)->toHaveCount(1);
 });

@@ -481,11 +481,15 @@ This is off by default because it widens what the app can see: with the host's `
 
 ## Sample rates from Watch Tower
 
-On by default (`WATCHTOWER_AGENT_SETTINGS`). Nightwatch's sample rates for requests, commands, exceptions and scheduled tasks can be set per environment in Watch Tower (Settings → Environments → Sampling) instead of in each app's `.env`.
+On by default (`WATCHTOWER_AGENT_SETTINGS`). Nightwatch's sample rates for requests, commands, exceptions and scheduled tasks, and per-record rates for queries, cache events, outgoing requests, queued jobs, mail and notifications, can be set per environment in Watch Tower (Settings → Sampling) instead of in each app's `.env`.
 
 `watchtower:settings-sync` pulls them every five minutes from `GET {NIGHTWATCH_BASE_URL}/api/agent/v1/settings` with `NIGHTWATCH_TOKEN` (ETag / 304) and keeps the last good copy in the cache. Every process applies them to Nightwatch: at boot (each PHP-FPM request), before each Octane request and on every queue worker loop, reading the cache at most once a minute. A change in Watch Tower takes effect within about six minutes, with no redeploy.
 
 A rate left unset in Watch Tower keeps the app's own value (`NIGHTWATCH_REQUEST_SAMPLE_RATE` and so on), and clearing one restores it. When Watch Tower can't be reached the last good settings stay in use; with none cached, the app's own rates apply. The sync call itself is never recorded.
+
+### Per-record rates (0.8+)
+
+Inside the executions Nightwatch keeps, Watch Tower can also sample single record types: **queries**, **cache events**, **outgoing requests**, **queued jobs** (dispatches), **mail** and **notifications**. The agent adds one reject callback per type to Nightwatch (`rejectQueries`, `rejectCacheEvents`, `rejectOutgoingRequests`, `rejectQueuedJobs`, `rejectMail`, `rejectNotifications`) that keeps each record with the probability set in Watch Tower; unset means keep all, `0` means keep none. Your own reject callbacks keep working next to them. Nightwatch counts a record before it asks the callbacks, so an execution's totals (a request's "queries" count) still include the ones dropped. The rates come with the same settings sync and are read from the cache at most once a minute per process.
 
 The page-load rate for browser monitoring comes from the same Watch Tower setting; the browser script reads it from Watch Tower's config response, so nothing in the app changes.
 
