@@ -8,11 +8,19 @@
 namespace App\Models {
 
     use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Database\Eloquent\Relations\BelongsTo;
+    use Illuminate\Database\Eloquent\Relations\HasMany;
+    use Illuminate\Database\Eloquent\SoftDeletes;
     use Illuminate\Notifications\Notifiable;
 
     class Order extends Model
     {
         protected $guarded = [];
+
+        public function customer(): BelongsTo
+        {
+            return $this->belongsTo(Customer::class);
+        }
     }
 
     class Customer extends Model
@@ -21,10 +29,22 @@ namespace App\Models {
 
         protected $guarded = [];
 
+        public function orders(): HasMany
+        {
+            return $this->hasMany(Order::class);
+        }
+
         public function routeNotificationForVonage(): string
         {
             return '+15550100';
         }
+    }
+
+    class Ticket extends Model
+    {
+        use SoftDeletes;
+
+        protected $guarded = [];
     }
 }
 

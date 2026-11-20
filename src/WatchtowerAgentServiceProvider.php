@@ -29,6 +29,7 @@ use Cyberwizard\WatchtowerAgent\Health\HealthCheckRegistry;
 use Cyberwizard\WatchtowerAgent\Http\HttpRecorder;
 use Cyberwizard\WatchtowerAgent\Http\Middleware\RecordTraceparent;
 use Cyberwizard\WatchtowerAgent\Mail\MailRecorder;
+use Cyberwizard\WatchtowerAgent\Models\ModelRecorder;
 use Cyberwizard\WatchtowerAgent\Notifications\NotificationRecorder;
 use Cyberwizard\WatchtowerAgent\Output\OutputCapture;
 use Cyberwizard\WatchtowerAgent\Queue\JobLifecycle;
@@ -62,6 +63,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Middleware\TrustProxies;
@@ -102,6 +104,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->app->singleton(BroadcastRecorder::class);
         $this->app->singleton(MailRecorder::class);
         $this->app->singleton(CacheOpRecorder::class);
+        $this->app->singleton(ModelRecorder::class);
         $this->app->singleton(HttpRecorder::class);
         $this->app->singleton(AuthRecorder::class);
         $this->app->singleton(NotificationRecorder::class);
@@ -264,6 +267,22 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         };
         $this->app->terminating($flush);
         $events->listen([CommandFinished::class, ScheduledTaskFinished::class, ScheduledTaskFailed::class], $flush);
+
+        // Model aggregates travel as one record per execution, so they are flushed at the
+        // same points (and once per queue job, which does not terminate the app).
+        $flushModels = static function (): void {
+            app(ModelRecorder::class)->flush();
+        };
+        $this->app->terminating($flushModels);
+        $events->listen([CommandFinished::class, ScheduledTaskFinished::class, ScheduledTaskFailed::class], $flushModels);
+        $events->listen([JobProcessed::class, JobFailed::class, JobReleasedAfterException::class, JobExceptionOccurred::class], $flushModels);
+
+        if (class_exists('Laravel\Octane\Events\RequestTerminated')) {
+            $events->listen('Laravel\Octane\Events\RequestTerminated', $flushModels);
+        }
+
+        $events->listen(QueryExecuted::class, [ModelRecorder::class, 'queryExecuted']);
+        $events->listen('eloquent.*', [ModelRecorder::class, 'modelEvent']);
 
         $events->listen(JobProcessing::class, [JobLifecycle::class, 'processing']);
         $events->listen(JobExceptionOccurred::class, [JobLifecycle::class, 'exceptionOccurred']);

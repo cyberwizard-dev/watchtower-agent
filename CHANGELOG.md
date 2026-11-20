@@ -4,6 +4,12 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-20
+
+### Added
+
+- Eloquent model observability (`models`, on by default, `WATCHTOWER_AGENT_MODELS`): one `wt-model` record per execution with exact counters per model (retrievals, creates, updates, deletes, soft deletes and restores), eager and lazy relationship loads, bounded lifecycle-event samples and query groups. Queries are attributed to the Eloquent builder or relation they ran under; the record carries Nightwatch's query group hash instead of SQL, so Watch Tower joins it to the queries it already stores. Model keys are masked by default; `WATCHTOWER_AGENT_MODELS_EXCLUDE` and `_EXCLUDE_TABLES` skip models and tables. `wt-hello` lists `models` when enabled.
+
 ## [0.8.0] - 2026-11-14
 
 ### Added

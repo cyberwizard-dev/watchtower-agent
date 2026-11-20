@@ -34,7 +34,7 @@ class Contract
     public const IN_EXECUTION = [
         'wt-event', 'wt-event-summary', 'wt-listener-run', 'wt-broadcast', 'wt-cache-op',
         'wt-mail', 'wt-http', 'wt-webhook-in', 'wt-trace-link', 'wt-auth', 'wt-shield',
-        'wt-notification',
+        'wt-notification', 'wt-model',
     ];
 
     public const TYPES = [
@@ -149,6 +149,10 @@ class Contract
             'duration' => '?int',
             'ttl' => '?int',
             'error' => '?string',
+        ],
+        'wt-model' => [
+            'models' => 'list',
+            'events' => 'list',
         ],
         'wt-mail' => [
             'mail_id' => 'string',

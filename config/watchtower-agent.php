@@ -50,6 +50,7 @@ return [
         'browser' => (bool) env('WATCHTOWER_AGENT_BROWSER', true),
         'host' => (bool) env('WATCHTOWER_AGENT_HOST', true),
         'settings' => (bool) env('WATCHTOWER_AGENT_SETTINGS', true),
+        'models' => (bool) env('WATCHTOWER_AGENT_MODELS', true),
     ],
 
     /*
@@ -127,6 +128,30 @@ return [
         'locks' => (bool) env('WATCHTOWER_AGENT_CACHE_LOCKS', false),
         'max_per_execution' => 100,
         'throttle_seconds' => (int) env('WATCHTOWER_AGENT_AUTH_THROTTLE_SECONDS', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Eloquent models (wt-model)
+    |--------------------------------------------------------------------------
+    |
+    | One record per execution holds exact counts and durations per model, plus
+    | bounded samples: lifecycle events (max_events), query groups
+    | (max_query_groups) and models (max_models, by first seen). Queries are
+    | attributed to the Eloquent builder or relation they ran under; raw
+    | query-builder queries are ignored. keys masks model identifiers:
+    | "masked" (id-like parts become *), "full" or "hidden". exclude takes
+    | fnmatch patterns of model classes; exclude_tables table names.
+    |
+    */
+
+    'models' => [
+        'keys' => env('WATCHTOWER_AGENT_MODELS_KEYS', 'masked'),
+        'max_events' => (int) env('WATCHTOWER_AGENT_MODELS_MAX_EVENTS', 50),
+        'max_query_groups' => (int) env('WATCHTOWER_AGENT_MODELS_MAX_QUERY_GROUPS', 100),
+        'max_models' => (int) env('WATCHTOWER_AGENT_MODELS_MAX_MODELS', 50),
+        'exclude' => $csv(env('WATCHTOWER_AGENT_MODELS_EXCLUDE')) ?? [],
+        'exclude_tables' => $csv(env('WATCHTOWER_AGENT_MODELS_EXCLUDE_TABLES')) ?? [],
     ],
 
     /*

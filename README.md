@@ -21,6 +21,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Events and listeners](#events-and-listeners)
 - [Broadcasting](#broadcasting)
 - [Cache operations](#cache-operations)
+- [Eloquent models](#eloquent-models)
 - [Mail](#mail)
 - [Notifications](#notifications)
 - [Outgoing HTTP and trace context](#outgoing-http-and-trace-context)
@@ -74,6 +75,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_EVENTS` | `true` | Application events, listeners and queued listener runs. |
 | `WATCHTOWER_AGENT_BROADCASTS` | `true` | Broadcast stages. |
 | `WATCHTOWER_AGENT_CACHE_OPS` | `true` | Cache flushes, lock flushes, failover (and locks, opt-in). |
+| `WATCHTOWER_AGENT_MODELS` | `true` | Eloquent model events, relationship loads and query attribution. |
 | `WATCHTOWER_AGENT_MAIL` | `true` | Mail lifecycle enrichment. |
 | `WATCHTOWER_AGENT_HTTP` | `true` | Outgoing HTTP enrichment. |
 | `WATCHTOWER_AGENT_WEBHOOKS` | `true` | Incoming webhooks and outgoing webhook tagging. |
@@ -89,6 +91,11 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_BROADCASTS_IGNORE_DRIVERS` | `null` | Drivers whose broadcasts are not recorded. |
 | `WATCHTOWER_AGENT_CACHE_KEYS` | `masked` | `masked`, `full` or `hidden`. |
 | `WATCHTOWER_AGENT_CACHE_LOCKS` | `false` | Report lock acquire/block/release. |
+| `WATCHTOWER_AGENT_MODELS_KEYS` | `masked` | Model keys in activity samples: `masked`, `full` or `hidden`. |
+| `WATCHTOWER_AGENT_MODELS_MAX_EVENTS` | `50` | Lifecycle event samples per execution. |
+| `WATCHTOWER_AGENT_MODELS_MAX_QUERY_GROUPS` | `100` | Query group samples per model per execution. |
+| `WATCHTOWER_AGENT_MODELS_MAX_MODELS` | `50` | Models reported per execution. |
+| `WATCHTOWER_AGENT_MODELS_EXCLUDE` / `_EXCLUDE_TABLES` | none | Comma-separated model `*` patterns or table names to skip. |
 | `WATCHTOWER_AGENT_MAIL_RECIPIENTS` | `masked` | `masked` (`j***@example.com`), `full` or `none`. |
 | `WATCHTOWER_AGENT_MAIL_BCC` | `false` | Include Bcc recipients. |
 | `WATCHTOWER_AGENT_MAIL_PREVIEW` | `false` | First 500 characters of the text part, redacted. |
@@ -165,6 +172,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `events` | `wt-event`, `wt-event-summary`, `wt-listener-run` | Each application event dispatched; each queued listener run by a worker. |
 | `broadcasts` | `wt-broadcast` | When a broadcast is queued, accepted by a driver or fails. |
 | `cache_ops` | `wt-cache-op` | Store flush, lock flush, failover; lock acquire/block/release when enabled. |
+| `models` | `wt-model` | One record per execution (request, job, command or task): exact counters per Eloquent model, relation aggregates, bounded lifecycle events and query groups. |
 | `mail` | `wt-mail` | Queued, sending, sent (accepted by the transport) and failed. |
 | `http` | `wt-http` | Every outgoing request attempt (Laravel Http client and Guzzle with the middleware). |
 | `webhooks` | `wt-webhook-in`, `wt-http.webhook` | Each request through `watchtower.webhook:{source}`; outgoing webhooks tagged. |
@@ -189,6 +197,7 @@ Every record has `v: 1`, `t`, `timestamp`, `deploy`, `server` and `agent_version
 | Health is probed from outside. | Database, Redis, cache, disk and queues are checked from inside the app. |
 | A notification record has no recipient (only the signed-in user, so jobs and commands show none) and is never marked failed. | Each recipient and channel is recorded with its label and route, and failures with their reason. |
 | Retrying a failed job means SSH and `queue:retry`. | One click in Watch Tower, verified and run by the agent. |
+| Queries are listed as SQL with no idea which Eloquent model or relationship produced them. | Each query is attributed to its model and relation, eager or lazy, with per-model operation counts and N+1 candidates. |
 
 ## Health checks
 
@@ -303,6 +312,21 @@ Nightwatch already records hits, misses, writes and deletes. `wt-cache-op` adds 
 | `lock-acquired`, `lock-blocked`, `lock-released` | `Cache::lock()` decorated, when `WATCHTOWER_AGENT_CACHE_LOCKS=true` | all |
 
 `Cache::flush()` goes straight to the store and fires no event, while `Cache::clear()` does the same flush with events; the agent adds a `flush` macro on the cache repository that calls `clear()`, so `Cache::flush()` and `artisan cache:clear` are recorded. Lock instrumentation is opt-in because `Cache::lock()` then returns a decorator (implementing the `Lock` contract and forwarding every other method) instead of the store's own lock class; locks taken directly from a store (`Cache::getStore()->lock()`, the scheduler's overlap mutex) are not seen. Increments, decrements and expirations fire no Laravel event and can't be observed. Keys are masked by default (`user:123:profile` → `user:*:profile`).
+
+## Eloquent models
+
+Nightwatch reports individual queries but not the model or relationship they came from. `wt-model` adds the model level: one record per request, job, command or scheduled task, with exact counters per model and bounded samples of what happened.
+
+| Field | Value |
+|---|---|
+| `models[]` | One entry per model: `model`, `table`, `connection`, `operations` and `ops` (retrieved, creating, created, updating, updated, saving, saved, deleting, deleted, restoring, restored, forceDeleting, forceDeleted), `queries`, `duration`, `max_duration`. |
+| `models[].relations[]` | `name`, `related`, and how many queries were eager or lazy, with duration and maximum. |
+| `models[].query_groups[]` | Nightwatch's query group hash (`group`), `relation`, `related`, `load` (`direct`, `eager` or `lazy`), calls, duration and first timestamp. |
+| `events[]` | A bounded sample of lifecycle events: `model`, `operation`, the masked key and the query group that produced it. |
+
+Queries are attributed through the execution stack: the nearest Eloquent builder or relation the query ran under. That is how `User::with('roles')->get()` attributes the `roles` query to `User.roles` as `eager`, and `$user->posts` attributes it as `lazy`. Raw query-builder queries have no model and are ignored. Model bulk updates and deletes (`User::query()->update()`) carry a model for their query but fire no lifecycle events, so they show as queries without a `retrieved`/`updated` event. SQL is never sent: Watch Tower joins the group hash to the query records Nightwatch already stored, so the Database module remains the only owner of query text.
+
+Nothing is sent per query or per event. Lifecycle events are sampled up to `max_events` (50), query groups up to `max_query_groups` (100) and models up to `max_models` (50) per execution; counters stay exact. The record is buffered with the execution, so it follows Nightwatch's sampling, and is capped so Nightwatch's 500-record buffer is not flooded. Model keys are masked by default (`42` → `*`, UUIDs, ULIDs and e-mails too); `WATCHTOWER_AGENT_MODELS_KEYS=full` keeps them and `hidden` drops them. Exclude models with `WATCHTOWER_AGENT_MODELS_EXCLUDE` (comma-separated `*` patterns, e.g. `App\Models\Audit*`) or tables with `WATCHTOWER_AGENT_MODELS_EXCLUDE_TABLES`. No attributes or model payloads are read. The watch cost is one bounded backtrace per query while the feature is on; turn it off with `WATCHTOWER_AGENT_MODELS=false`.
 
 ## Mail
 
