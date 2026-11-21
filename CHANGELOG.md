@@ -8,7 +8,7 @@ Notable changes to `cyberwizard/watchtower-agent` are documented here. The forma
 
 ### Added
 
-- Custom metrics (`metrics`, on by default, `WATCHTOWER_AGENT_METRICS`): `WatchtowerAgent::metric($name, $value, $tags)` sends a `wt-metric` gauge immediately with Nightwatch's `writeNow()`, so the app's sample rates never drop a business number. Names are dotted identifiers up to 120 characters; values are numbers or numeric strings; tags are up to 20 flat scalar pairs. Invalid names, non-finite values and malformed tags are ignored instead of thrown, and a failing transport never reaches the host app. Watch Tower charts the samples on a dashboard and can alert on them. `wt-hello` lists `metrics` when enabled.
+- Custom metrics (`metrics`, on by default, `WATCHTOWER_AGENT_METRICS`): `WatchtowerAgent::metric($name, $value, $tags)` sends a `wt-metric` gauge immediately with Nightwatch's `writeNow()`, so the app's sample rates never drop a business number. Names are dotted identifiers up to 120 characters; values are numbers or numeric strings; tags are up to 20 flat scalar pairs. Invalid names, non-finite values and malformed tags are ignored instead of thrown, and a failing transport never reaches the host app. Watch Tower charts the samples on a dashboard. `wt-hello` lists `metrics` when enabled.
 
 ## [0.9.0] - 2026-11-20
 

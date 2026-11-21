@@ -344,7 +344,7 @@ WatchtowerAgent::metric('queue.lag', $seconds, ['queue' => 'default']);
 
 The name is a dotted identifier (`[A-Za-z0-9_.:-]`, up to 120 characters). The value is an `int`, `float` or numeric string (a non-number, `NAN` or `INF` is ignored). Tags are up to 20 flat scalar pairs; keys use the same characters, values are truncated to 100 characters. Each call sends a `wt-metric` record immediately with Nightwatch's `writeNow()`, so **Nightwatch's sample rate never drops a metric**, and an invalid call returns without throwing: a typo in telemetry must not break the request that reports it.
 
-Watch Tower keeps the raw samples (pruned with the telemetry retention), shows the metric names it has received, and charts them on a dashboard with `avg`, `sum`, `min`, `max`, `count` or `last` per bucket, optionally filtered by tag. The same samples can back an alert rule. Turn the API off with `WATCHTOWER_AGENT_METRICS=false`; `wt-hello` lists `metrics` when enabled.
+Watch Tower keeps the raw samples (pruned with the telemetry retention), shows the metric names it has received, and charts them on a dashboard with `avg`, `sum`, `min`, `max`, `count` or `last` per bucket, optionally filtered by tag. Turn the API off with `WATCHTOWER_AGENT_METRICS=false`; `wt-hello` lists `metrics` when enabled.
 
 ## Mail
 
