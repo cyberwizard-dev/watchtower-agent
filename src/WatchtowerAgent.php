@@ -5,6 +5,7 @@ namespace Cyberwizard\WatchtowerAgent;
 use Closure;
 use Cyberwizard\WatchtowerAgent\Health\HealthCheckRegistry;
 use Cyberwizard\WatchtowerAgent\Http\HttpRecorder;
+use Cyberwizard\WatchtowerAgent\Metrics\MetricRecorder;
 use Cyberwizard\WatchtowerAgent\Shield\Honeypot;
 use Cyberwizard\WatchtowerAgent\Support\Guard;
 use Cyberwizard\WatchtowerAgent\Webhooks\RecordIncomingWebhook;
@@ -12,7 +13,7 @@ use Cyberwizard\WatchtowerAgent\Webhooks\WebhookState;
 
 class WatchtowerAgent
 {
-    public const VERSION = '0.9.0';
+    public const VERSION = '0.10.0';
 
     /**
      * Every feature the package knows about, in the order the hello record lists them.
@@ -22,7 +23,7 @@ class WatchtowerAgent
     public const FEATURES = [
         'schedule', 'queues', 'workers', 'output', 'catchup', 'health', 'bindings', 'actions',
         'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context', 'auth',
-        'notifications', 'shield', 'host', 'settings', 'models',
+        'notifications', 'shield', 'host', 'settings', 'models', 'metrics',
     ];
 
     /**
@@ -34,6 +35,23 @@ class WatchtowerAgent
     public static function check(string $name, Closure $check): void
     {
         app(HealthCheckRegistry::class)->register($name, $check);
+    }
+
+    /**
+     * Report a custom gauge, e.g. WatchtowerAgent::metric('orders.processed', 42, ['region' => 'eu']).
+     *
+     * The name is a dotted identifier ([A-Za-z0-9_.:-], up to 120 characters); the value is a
+     * number (or a numeric string); tags are flat scalar pairs. Metrics are sent immediately, so
+     * Nightwatch's sample rate never drops them. An invalid name or value is ignored, never
+     * thrown: a bad metric call must not break the request that reports it.
+     *
+     * @param  array<string, string|int|float|bool|null>  $tags
+     */
+    public static function metric(string $name, int|float|string $value, array $tags = []): void
+    {
+        // The recorder ignores agent-internal calls and wraps the send itself, so a
+        // telemetry failure or a malformed metric never reaches the host app.
+        app(MetricRecorder::class)->record($name, $value, $tags);
     }
 
     /**

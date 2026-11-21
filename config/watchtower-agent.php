@@ -51,6 +51,8 @@ return [
         'host' => (bool) env('WATCHTOWER_AGENT_HOST', true),
         'settings' => (bool) env('WATCHTOWER_AGENT_SETTINGS', true),
         'models' => (bool) env('WATCHTOWER_AGENT_MODELS', true),
+        // Custom gauges (wt-metric) sent with WatchtowerAgent::metric(). Cheap and manual, so on.
+        'metrics' => (bool) env('WATCHTOWER_AGENT_METRICS', true),
     ],
 
     /*

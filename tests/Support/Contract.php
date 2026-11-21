@@ -243,6 +243,11 @@ class Contract
             'user_id' => '?string',
             'rules_version' => 'string',
         ],
+        'wt-metric' => [
+            'name' => 'string',
+            'value' => 'float',
+            'tags' => '?object',
+        ],
         'wt-host' => [
             'scope' => 'string',
             'os' => 'string',

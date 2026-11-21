@@ -1,6 +1,6 @@
 {
     "name": "cyberwizard/watchtower-agent",
-    "description": "Companion to laravel/nightwatch that sends schedule, queue, worker, output, health, catch-up, event, broadcast, cache, mail, HTTP and webhook records to a self-hosted Watch Tower backend.",
+    "description": "Companion to laravel/nightwatch that sends schedule, queue, worker, output, health, catch-up, event, broadcast, cache, mail, HTTP, webhook and custom metric records to a self-hosted Watch Tower backend.",
     "keywords": [
         "laravel",
         "nightwatch",
@@ -11,7 +11,8 @@
         "events",
         "broadcasting",
         "mail",
-        "webhooks"
+        "webhooks",
+        "metrics"
     ],
     "license": "MIT",
     "type": "library",

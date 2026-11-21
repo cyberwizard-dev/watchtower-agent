@@ -83,6 +83,7 @@ it('merges the default config', function () {
         'host' => true,
         'settings' => true,
         'models' => true,
+        'metrics' => true,
     ])->and(config('watchtower-agent.max_output_bytes'))->toBe(65536)
         ->and(config('watchtower-agent.capture_all_task_output'))->toBeFalse()
         ->and(config('watchtower-agent.queues'))->toBeNull()

@@ -22,6 +22,7 @@ This package sends the missing facts. It installs next to `laravel/nightwatch` a
 - [Broadcasting](#broadcasting)
 - [Cache operations](#cache-operations)
 - [Eloquent models](#eloquent-models)
+- [Custom metrics](#custom-metrics)
 - [Mail](#mail)
 - [Notifications](#notifications)
 - [Outgoing HTTP and trace context](#outgoing-http-and-trace-context)
@@ -76,6 +77,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_BROADCASTS` | `true` | Broadcast stages. |
 | `WATCHTOWER_AGENT_CACHE_OPS` | `true` | Cache flushes, lock flushes, failover (and locks, opt-in). |
 | `WATCHTOWER_AGENT_MODELS` | `true` | Eloquent model events, relationship loads and query attribution. |
+| `WATCHTOWER_AGENT_METRICS` | `true` | Custom gauges sent with `WatchtowerAgent::metric()`. |
 | `WATCHTOWER_AGENT_MAIL` | `true` | Mail lifecycle enrichment. |
 | `WATCHTOWER_AGENT_HTTP` | `true` | Outgoing HTTP enrichment. |
 | `WATCHTOWER_AGENT_WEBHOOKS` | `true` | Incoming webhooks and outgoing webhook tagging. |
@@ -173,6 +175,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `broadcasts` | `wt-broadcast` | When a broadcast is queued, accepted by a driver or fails. |
 | `cache_ops` | `wt-cache-op` | Store flush, lock flush, failover; lock acquire/block/release when enabled. |
 | `models` | `wt-model` | One record per execution (request, job, command or task): exact counters per Eloquent model, relation aggregates, bounded lifecycle events and query groups. |
+| `metrics` | `wt-metric` | When the app calls `WatchtowerAgent::metric()`. Sent immediately, so Nightwatch's sampling never drops a business number. |
 | `mail` | `wt-mail` | Queued, sending, sent (accepted by the transport) and failed. |
 | `http` | `wt-http` | Every outgoing request attempt (Laravel Http client and Guzzle with the middleware). |
 | `webhooks` | `wt-webhook-in`, `wt-http.webhook` | Each request through `watchtower.webhook:{source}`; outgoing webhooks tagged. |
@@ -327,6 +330,21 @@ Nightwatch reports individual queries but not the model or relationship they cam
 Queries are attributed through the execution stack: the nearest Eloquent builder or relation the query ran under. That is how `User::with('roles')->get()` attributes the `roles` query to `User.roles` as `eager`, and `$user->posts` attributes it as `lazy`. Raw query-builder queries have no model and are ignored. Model bulk updates and deletes (`User::query()->update()`) carry a model for their query but fire no lifecycle events, so they show as queries without a `retrieved`/`updated` event. SQL is never sent: Watch Tower joins the group hash to the query records Nightwatch already stored, so the Database module remains the only owner of query text.
 
 Nothing is sent per query or per event. Lifecycle events are sampled up to `max_events` (50), query groups up to `max_query_groups` (100) and models up to `max_models` (50) per execution; counters stay exact. The record is buffered with the execution, so it follows Nightwatch's sampling, and is capped so Nightwatch's 500-record buffer is not flooded. Model keys are masked by default (`42` → `*`, UUIDs, ULIDs and e-mails too); `WATCHTOWER_AGENT_MODELS_KEYS=full` keeps them and `hidden` drops them. Exclude models with `WATCHTOWER_AGENT_MODELS_EXCLUDE` (comma-separated `*` patterns, e.g. `App\Models\Audit*`) or tables with `WATCHTOWER_AGENT_MODELS_EXCLUDE_TABLES`. No attributes or model payloads are read. The watch cost is one bounded backtrace per query while the feature is on; turn it off with `WATCHTOWER_AGENT_MODELS=false`.
+
+## Custom metrics
+
+Report a number from anywhere in the app — a business KPI, queue lag, a balance — and chart it in Watch Tower:
+
+```php
+use Cyberwizard\WatchtowerAgent\WatchtowerAgent;
+
+WatchtowerAgent::metric('orders.processed', 42, ['region' => 'eu']);
+WatchtowerAgent::metric('queue.lag', $seconds, ['queue' => 'default']);
+```
+
+The name is a dotted identifier (`[A-Za-z0-9_.:-]`, up to 120 characters). The value is an `int`, `float` or numeric string (a non-number, `NAN` or `INF` is ignored). Tags are up to 20 flat scalar pairs; keys use the same characters, values are truncated to 100 characters. Each call sends a `wt-metric` record immediately with Nightwatch's `writeNow()`, so **Nightwatch's sample rate never drops a metric**, and an invalid call returns without throwing: a typo in telemetry must not break the request that reports it.
+
+Watch Tower keeps the raw samples (pruned with the telemetry retention), shows the metric names it has received, and charts them on a dashboard with `avg`, `sum`, `min`, `max`, `count` or `last` per bucket, optionally filtered by tag. The same samples can back an alert rule. Turn the API off with `WATCHTOWER_AGENT_METRICS=false`; `wt-hello` lists `metrics` when enabled.
 
 ## Mail
 
