@@ -165,7 +165,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | Feature | Record | When |
 |---|---|---|
 | `schedule` | `wt-schedule` | Every 10 minutes and on `watchtower:hello`. Every scheduled event with cron, timezone, flags, description, next run and whether it replays on catch-up. |
-| `queues` | `wt-queue-snapshot` | Every minute. Size, pending, delayed, reserved and oldest pending job per connection and queue, plus the failed job count. A measure the driver can't provide is `null`. |
+| `queues` | `wt-queue-snapshot`, `wt-horizon-snapshot` | Every minute. Queue depth per connection and queue, plus Laravel Horizon master/supervisor status, worker counts, and recent, pending, completed, failed and silenced job counts when Horizon is installed. Horizon is detected automatically and uses its repositories; applications without Horizon continue with the normal queue snapshot only. |
 | `workers` | `wt-worker` | `starting` when `queue:work` starts, `alive` at most every 30 seconds while it loops, `stopping` with the reason, jobs processed and memory. |
 | `output` | `wt-output` | After a scheduled task whose output goes to a file, and after `Artisan::call()`. |
 | `catchup` | `wt-catchup`, `wt-outage` | When cyberwizard/schedule-catchup replays a missed occurrence or records an outage. |
