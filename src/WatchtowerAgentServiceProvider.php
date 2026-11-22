@@ -18,6 +18,7 @@ use Cyberwizard\WatchtowerAgent\Console\ActionsCommand;
 use Cyberwizard\WatchtowerAgent\Console\HealthReportCommand;
 use Cyberwizard\WatchtowerAgent\Console\HelloCommand;
 use Cyberwizard\WatchtowerAgent\Console\HostSnapshotCommand;
+use Cyberwizard\WatchtowerAgent\Console\OctaneScanCommand;
 use Cyberwizard\WatchtowerAgent\Console\QueueSnapshotCommand;
 use Cyberwizard\WatchtowerAgent\Console\ScheduleSyncCommand;
 use Cyberwizard\WatchtowerAgent\Console\SettingsSyncCommand;
@@ -31,6 +32,8 @@ use Cyberwizard\WatchtowerAgent\Http\Middleware\RecordTraceparent;
 use Cyberwizard\WatchtowerAgent\Mail\MailRecorder;
 use Cyberwizard\WatchtowerAgent\Models\ModelRecorder;
 use Cyberwizard\WatchtowerAgent\Notifications\NotificationRecorder;
+use Cyberwizard\WatchtowerAgent\Octane\OctaneRuntimeMonitor;
+use Cyberwizard\WatchtowerAgent\Octane\SingletonSafetyScanner;
 use Cyberwizard\WatchtowerAgent\Output\OutputCapture;
 use Cyberwizard\WatchtowerAgent\Queue\JobLifecycle;
 use Cyberwizard\WatchtowerAgent\Queue\QueuePayload;
@@ -95,6 +98,8 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
         $this->app->singleton(Recorder::class);
         $this->app->singleton(HealthCheckRegistry::class);
         $this->app->singleton(WorkerHeartbeat::class);
+        $this->app->singleton(OctaneRuntimeMonitor::class);
+        $this->app->singleton(SingletonSafetyScanner::class);
         $this->app->singleton(OutputCapture::class);
         $this->app->singleton(CatchupReporter::class);
         $this->app->singleton(ExecutionLimiter::class);
@@ -144,6 +149,7 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
                 ActionsCommand::class,
                 ShieldSyncCommand::class,
                 HostSnapshotCommand::class,
+                OctaneScanCommand::class,
                 SettingsSyncCommand::class,
             ]);
         }
@@ -193,6 +199,20 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
      */
     private function registerListeners(Dispatcher $events): void
     {
+        $octaneEvents = [
+            'Laravel\\Octane\\Events\\WorkerStarting' => 'workerStarted',
+            'Laravel\\Octane\\Events\\RequestReceived' => 'requestReceived',
+            'Laravel\\Octane\\Events\\RequestHandled' => 'requestHandled',
+            'Laravel\\Octane\\Events\\WorkerStopping' => 'workerStopping',
+            'Laravel\\Octane\\Events\\WorkerErrorOccurred' => 'workerError',
+        ];
+
+        foreach ($octaneEvents as $event => $method) {
+            if (class_exists($event)) {
+                $events->listen($event, [OctaneRuntimeMonitor::class, $method]);
+            }
+        }
+
         if (class_exists(WorkerStarting::class)) {
             $events->listen(WorkerStarting::class, [WorkerHeartbeat::class, 'starting']);
         }
@@ -488,6 +508,10 @@ class WatchtowerAgentServiceProvider extends ServiceProvider
 
         if (WatchtowerAgent::feature('host')) {
             $schedule->command(HostSnapshotCommand::class)->everyMinute()->withoutOverlapping(5);
+        }
+
+        if (WatchtowerAgent::feature('octane')) {
+            $schedule->command(OctaneScanCommand::class)->daily()->withoutOverlapping(60);
         }
 
         if (WatchtowerAgent::feature('settings')) {

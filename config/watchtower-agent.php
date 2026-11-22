@@ -32,6 +32,7 @@ return [
         'schedule' => (bool) env('WATCHTOWER_AGENT_SCHEDULE', true),
         'queues' => (bool) env('WATCHTOWER_AGENT_QUEUES', true),
         'workers' => (bool) env('WATCHTOWER_AGENT_WORKERS', true),
+        'octane' => (bool) env('WATCHTOWER_AGENT_OCTANE', true),
         'output' => (bool) env('WATCHTOWER_AGENT_OUTPUT', true),
         'catchup' => (bool) env('WATCHTOWER_AGENT_CATCHUP', true),
         'health' => (bool) env('WATCHTOWER_AGENT_HEALTH', true),
@@ -403,6 +404,10 @@ return [
     'queues' => $csv(env('WATCHTOWER_AGENT_QUEUE_LIST')),
 
     'worker_heartbeat_seconds' => (int) env('WATCHTOWER_AGENT_WORKER_HEARTBEAT', 30),
+
+    'octane' => [
+        'snapshot_seconds' => (int) env('WATCHTOWER_AGENT_OCTANE_SNAPSHOT_SECONDS', 30),
+    ],
 
     /*
     |--------------------------------------------------------------------------

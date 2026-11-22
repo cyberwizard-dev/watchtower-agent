@@ -67,7 +67,9 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `WATCHTOWER_AGENT_ENABLED` | `true` | Master switch. |
 | `WATCHTOWER_AGENT_SCHEDULE` | `true` | Schedule registry. |
 | `WATCHTOWER_AGENT_QUEUES` | `true` | Queue depth snapshots. |
-| `WATCHTOWER_AGENT_WORKERS` | `true` | Worker heartbeats. |
+| `WATCHTOWER_AGENT_WORKERS` | `true` | Queue worker heartbeats. |
+| `WATCHTOWER_AGENT_OCTANE` | `true` | Laravel Octane worker lifecycle and memory telemetry. |
+| `WATCHTOWER_AGENT_OCTANE_SNAPSHOT_SECONDS` | `30` | Minimum interval between Octane worker runtime snapshots. |
 | `WATCHTOWER_AGENT_OUTPUT` | `true` | Task and command output. |
 | `WATCHTOWER_AGENT_CATCHUP` | `true` | schedule-catchup replays and outages. |
 | `WATCHTOWER_AGENT_HEALTH` | `true` | In-app health reports. |
@@ -167,6 +169,7 @@ php artisan vendor:publish --tag=watchtower-agent-config
 | `schedule` | `wt-schedule` | Every 10 minutes and on `watchtower:hello`. Every scheduled event with cron, timezone, flags, description, next run and whether it replays on catch-up. |
 | `queues` | `wt-queue-snapshot`, `wt-horizon-snapshot` | Every minute. Queue depth per connection and queue, plus Laravel Horizon master/supervisor status, worker counts, and recent, pending, completed, failed and silenced job counts when Horizon is installed. Horizon is detected automatically and uses its repositories; applications without Horizon continue with the normal queue snapshot only. |
 | `workers` | `wt-worker` | `starting` when `queue:work` starts, `alive` at most every 30 seconds while it loops, `stopping` with the reason, jobs processed and memory. |
+| `octane` | `wt-octane` | Octane worker start, periodic request/memory snapshots, stop and worker errors. Reports process memory, growth from worker baseline, peak memory, request count, last request duration and uptime. Requires Laravel Octane; silently inactive otherwise. |
 | `output` | `wt-output` | After a scheduled task whose output goes to a file, and after `Artisan::call()`. |
 | `catchup` | `wt-catchup`, `wt-outage` | When cyberwizard/schedule-catchup replays a missed occurrence or records an outage. |
 | `health` | `wt-health` | Every minute. Built-in and application checks. |
@@ -574,3 +577,12 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+
+### OctaneGuard
+
+When Octane support is enabled, the agent reports worker lifecycle and memory snapshots. It also
+scans registered application singleton bindings daily for mutable request, session, user or tenant
+state that may survive into another request. Run `php artisan watchtower:octane-scan` to trigger a
+scan manually. The scanner reports file locations and confidence levels; findings are review
+suggestions, not proof of a vulnerability. It does not transmit source code or property values.

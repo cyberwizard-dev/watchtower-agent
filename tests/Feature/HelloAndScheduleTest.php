@@ -18,7 +18,7 @@ it('sends wt-hello and the schedule', function () {
     expect($hello)->toHaveCount(1);
     Contract::assertRecord($hello[0], 'wt-hello');
     expect($hello[0]['features'])->toBe([
-        'schedule', 'queues', 'workers', 'output', 'catchup', 'health',
+        'schedule', 'queues', 'workers', 'octane', 'output', 'catchup', 'health',
         'events', 'broadcasts', 'cache_ops', 'mail', 'http', 'webhooks', 'trace_context', 'auth',
         'notifications', 'host', 'settings', 'models', 'metrics',
     ])

@@ -1,11 +1,13 @@
 {
     "name": "cyberwizard/watchtower-agent",
-    "description": "Companion to laravel/nightwatch that sends schedule, queue, worker, output, health, catch-up, event, broadcast, cache, mail, HTTP, webhook and custom metric records to a self-hosted Watch Tower backend.",
+    "description": "Companion to laravel/nightwatch that sends runtime, Octane, schedule, queue, worker, output, health, catch-up, event, broadcast, cache, mail, HTTP, webhook and custom metric records to a self-hosted Watch Tower backend.",
     "keywords": [
         "laravel",
         "nightwatch",
         "watch-tower",
         "monitoring",
+        "octane",
+        "frankenphp",
         "scheduler",
         "queue",
         "events",

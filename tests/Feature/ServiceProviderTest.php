@@ -19,6 +19,7 @@ it('registers the commands', function () {
         'watchtower:health-report',
         'watchtower:actions',
         'watchtower:host-snapshot',
+        'watchtower:octane-scan',
         'watchtower:settings-sync',
     );
 });
@@ -32,6 +33,7 @@ it('schedules the agent commands without overlapping', function () {
         'watchtower:queue-snapshot',
         'watchtower:health-report',
         'watchtower:host-snapshot',
+        'watchtower:octane-scan',
         'watchtower:settings-sync',
     ])
         ->and($events['watchtower:hello']->expression)->toBe('0 * * * *')
@@ -39,6 +41,7 @@ it('schedules the agent commands without overlapping', function () {
         ->and($events['watchtower:queue-snapshot']->expression)->toBe('* * * * *')
         ->and($events['watchtower:health-report']->expression)->toBe('* * * * *')
         ->and($events['watchtower:host-snapshot']->expression)->toBe('* * * * *')
+        ->and($events['watchtower:octane-scan']->expression)->toBe('0 0 * * *')
         ->and($events['watchtower:settings-sync']->expression)->toBe('*/5 * * * *');
 
     foreach ($events as $event) {
@@ -50,6 +53,7 @@ it('schedules the agent commands without overlapping', function () {
         ->and($events['watchtower:queue-snapshot']->expiresAt)->toBe(5)
         ->and($events['watchtower:health-report']->expiresAt)->toBe(5)
         ->and($events['watchtower:host-snapshot']->expiresAt)->toBe(5)
+        ->and($events['watchtower:octane-scan']->expiresAt)->toBe(60)
         ->and($events['watchtower:settings-sync']->expiresAt)->toBe(5);
 });
 
@@ -64,6 +68,7 @@ it('merges the default config', function () {
         'schedule' => true,
         'queues' => true,
         'workers' => true,
+        'octane' => true,
         'output' => true,
         'catchup' => true,
         'health' => true,
